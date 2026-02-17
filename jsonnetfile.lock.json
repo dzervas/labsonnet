@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "dependencies": [
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/external-secrets-libsonnet.git",
+          "subdir": ""
+        }
+      },
+      "version": "ddce992764944c4e8e93de79a593a4c8a9768ed2",
+      "sum": "WSLTwihG8gFYVJYKhORLGE7KeONIAaUgf8R2Njgd33o="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/gateway-api-libsonnet.git",
+          "subdir": ""
+        }
+      },
+      "version": "bc2c4d27488d85054f7035620507e524bde22a13",
+      "sum": "0ItZkzKbx2eJD2aC8wmOtcOD6JVSJ1751sw3DmKcXn0="
+    },
+    {
+      "source": {
+        "git": {
+          "remote": "https://github.com/jsonnet-libs/k8s-libsonnet.git",
+          "subdir": "1.33"
+        }
+      },
+      "version": "55380470fb7979e6ce0c4316cb9c27a266caf298",
+      "sum": "FTic3KWLxPcO/DpkwJ6AgvWmbxouYiAVrflXtbAiIhY="
+    }
+  ],
+  "legacyImports": false
+}

@@ -1,0 +1,162 @@
+// Workload builder — assembles a Deployment or StatefulSet.
+
+local affinity = import './helpers/affinity.libsonnet';
+local k = import 'k.libsonnet';
+local pvcLib = import 'pvc.libsonnet';
+
+local container = k.core.v1.container;
+local envVar = k.core.v1.envVar;
+local port = k.core.v1.containerPort;
+local volume = k.core.v1.volume;
+local volumeMount = k.core.v1.volumeMount;
+
+{
+  new(name, image, cfg)::
+    local workload = if cfg.type == 'Deployment' then k.apps.v1.deployment else k.apps.v1.statefulSet;
+    local imagePullPolicy = if std.endsWith(image, ':latest') || std.length(std.findSubstr(':', image)) == 0 then 'Always' else 'IfNotPresent';
+
+    local pvVolumes = std.map(
+      function(mountPath)
+        local volName = pvcLib.volumeName(name, mountPath, cfg.pvs[mountPath]);
+        if std.objectHas(cfg.pvs[mountPath], 'emptyDir') && cfg.pvs[mountPath].emptyDir then
+          volume.fromEmptyDir(volName)
+        else
+          volume.fromPersistentVolumeClaim(volName, volName),
+      std.objectFields(cfg.pvs)
+    );
+
+    local pvMounts = std.map(
+      function(mountPath)
+        local volName = pvcLib.volumeName(name, mountPath, cfg.pvs[mountPath]);
+        local readOnly = std.objectHas(cfg.pvs[mountPath], 'readOnly') && cfg.pvs[mountPath].readOnly;
+        volumeMount.new(volName, mountPath, readOnly),
+      std.objectFields(cfg.pvs)
+    );
+
+    local secretVolumes = std.map(
+      function(mountPath) volume.fromSecret(cfg.secrets[mountPath].name, cfg.secrets[mountPath].name),
+      std.objectFields(cfg.secrets)
+    );
+
+    local secretMounts = std.map(
+      function(mountPath)
+        local s = cfg.secrets[mountPath];
+        volumeMount.new(s.name, mountPath, if std.objectHas(s, 'readOnly') then s.readOnly else true),
+      std.objectFields(cfg.secrets)
+    );
+
+    // External secret mount volumes and mounts
+    local esMountSuffixes = std.objectFields(cfg.externalSecretMounts);
+    local esMountVolumes = std.map(
+      function(suffix)
+        local secretName = name + '-' + suffix;
+        volume.fromSecret(secretName, secretName),
+      esMountSuffixes
+    );
+    local esMountMounts = std.map(
+      function(suffix)
+        local esm = cfg.externalSecretMounts[suffix];
+        local secretName = name + '-' + suffix;
+        local readOnly = if std.objectHas(esm, 'readOnly') then esm.readOnly else true;
+        volumeMount.new(secretName, esm.mountPath, readOnly),
+      esMountSuffixes
+    );
+
+    local allVolumes = pvVolumes + secretVolumes + esMountVolumes;
+    local podVolumes = if cfg.type == 'Deployment' then allVolumes
+    else std.filter(function(v) !std.objectHas(v, 'persistentVolumeClaim'), allVolumes);
+
+    local secretEnvVars = std.map(
+      function(entry)
+        envVar.withName(entry.name)
+        + envVar.valueFrom.secretKeyRef.withName(entry.secret)
+        + envVar.valueFrom.secretKeyRef.withKey(entry.key),
+      cfg.secretEnvs
+    );
+
+    local fieldRefEnvVars = std.map(
+      function(name)
+        envVar.fromFieldPath(name, cfg.fieldRefEnvs[name]),
+      std.objectFields(cfg.fieldRefEnvs)
+    );
+
+    // Build default container security context, then merge user overrides
+    local defaultSecCtx =
+      container.securityContext.withRunAsNonRoot(true)
+      + container.securityContext.withRunAsUser(cfg.runAsUser)
+      + container.securityContext.withRunAsGroup(cfg.runAsUser)
+      + container.securityContext.withAllowPrivilegeEscalation(false)
+      + container.securityContext.capabilities.withDrop(['ALL']);
+    local secCtxOverride =
+      if std.length(std.objectFields(cfg.securityContext)) > 0
+      then { securityContext+: cfg.securityContext }
+      else {};
+
+    local ctr =
+      container.new(name, image)
+      + container.withImagePullPolicy(imagePullPolicy)
+      + container.withPorts(std.map(
+        function(p) port.new(p.port) + port.withProtocol(p.protocol) + port.withName(p.name),
+        cfg.ports
+      ))
+      + container.withVolumeMounts(pvMounts + secretMounts + esMountMounts)
+      + container.withEnv(secretEnvVars + fieldRefEnvVars)
+      + container.withEnvMap(cfg.env)
+      + (if cfg.command != null then container.withCommand(cfg.command) else {})
+      + (if cfg.args != null then container.withArgs(cfg.args) else {})
+      + defaultSecCtx
+      + secCtxOverride
+      + (if cfg.resources != null then { resources: cfg.resources } else {})
+      + (if cfg.livenessProbe != null then { livenessProbe: cfg.livenessProbe } else {})
+      + (if cfg.readinessProbe != null then { readinessProbe: cfg.readinessProbe } else {})
+      + (if cfg.startupProbe != null then { startupProbe: cfg.startupProbe } else {});
+
+    local configMaps = std.foldl(
+      function(prev, mountPath)
+        local cm = cfg.configMaps[mountPath];
+        local readOnly = if std.objectHas(cm, 'readOnly') then cm.readOnly else true;
+        prev + workload.configVolumeMount(
+          cm.name,
+          mountPath,
+          volumeMountMixin=volumeMount.withReadOnly(readOnly),
+          volumeMixin=volume.configMap.withDefaultMode(std.parseOctal(if readOnly then '444' else '666'))
+        ),
+      std.objectFields(cfg.configMaps),
+      {}
+    );
+
+    // Build default pod security context, then merge user overrides
+    local defaultPodSecCtx =
+      workload.spec.template.spec.securityContext.withFsGroup(cfg.runAsUser)
+      + workload.spec.template.spec.securityContext.withRunAsNonRoot(true);
+    local podSecCtxOverride =
+      if std.length(std.objectFields(cfg.podSecurityContext)) > 0
+      then { spec+: { template+: { spec+: { securityContext+: cfg.podSecurityContext } } } }
+      else {};
+
+    workload.new(name=name, replicas=cfg.replicas, containers=[ctr])
+    + workload.spec.template.spec.withVolumes(podVolumes)
+    + (if cfg.type == 'StatefulSet' then
+         workload.spec.withVolumeClaimTemplates(pvcLib.build(name, cfg.namespace, cfg.pvs, cfg.labels))
+         + (if cfg.serviceName != null then workload.spec.withServiceName(cfg.serviceName) else {})
+         + (if cfg.podManagementPolicy != null then workload.spec.withPodManagementPolicy(cfg.podManagementPolicy) else {})
+       else {})
+    + configMaps
+    + (if cfg.affinity != null then affinity.withWorkloadAffinity(cfg.affinity) else {})
+    + workload.metadata.withNamespace(cfg.namespace)
+    + (if std.length(cfg.imagePullSecrets) > 0
+       then workload.spec.template.spec.withImagePullSecrets(
+         std.map(function(s) { name: s }, cfg.imagePullSecrets)
+       )
+       else {})
+    + defaultPodSecCtx
+    + podSecCtxOverride
+    + workload.spec.template.metadata.withLabelsMixin(cfg.labels)
+    + (if std.length(std.objectFields(cfg.podLabels)) > 0
+       then workload.spec.template.metadata.withLabelsMixin(cfg.podLabels)
+       else {})
+    + (if std.length(std.objectFields(cfg.podAnnotations)) > 0
+       then workload.spec.template.metadata.withAnnotationsMixin(cfg.podAnnotations)
+       else {})
+    + workload.spec.selector.withMatchLabelsMixin(cfg.labels),
+}
