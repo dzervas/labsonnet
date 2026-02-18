@@ -1,6 +1,7 @@
 // labsonnet — Compositional Kubernetes service builder using + operator.
 // Build workload + service + routes + pvcs + external secrets with with*() functions.
 
+local d = import 'github.com/jsonnet-libs/docsonnet/doc-util/main.libsonnet';
 local k = import 'k.libsonnet';
 local nsLib = k.core.v1.namespace;
 
@@ -55,6 +56,33 @@ local dedupPorts(ports) =
   ).result;
 
 {
+  '#':: d.pkg(
+    name='labsonnet',
+    url='https://github.com/dzervas/labsonnet',
+    help='Commonly used components to define a Kubernetes workload, mainly from a bare docker image',
+    filename=std.thisFile,
+    version='main'
+  ),
+
+  '#new':: d.fn(
+    help=|||
+      Main entrypoint for labsonnet, defines a new "app".
+      The `name` is used for most of the resources, namespace, service name, etc.
+
+      The rest of the functions work on top of this to alter various aspects of the app.
+
+      Example:
+
+      ```jsonnet
+      labsonnet.new('hello-world', 'nginx:latest')
+      + labsonnet.withEnv('MY_VAR', 'my-value')
+      ```
+    |||,
+    args=[
+      d.arg('name', d.T.string),
+      d.arg('image', d.T.string),
+    ]
+  ),
   new(name, image):: {
     _name:: name,
     _image:: image,
@@ -99,43 +127,16 @@ local dedupPorts(ports) =
 
     local me = self,
 
-    local processedPorts = std.map(processPort, me._ports),
-    local normalizedPorts = std.map(function(pp) pp.normalized, processedPorts),
-    local uniquePorts = dedupPorts(normalizedPorts),
-    local routedPorts = std.filter(function(pp) pp.routingKey != null, processedPorts),
-
-    local esSuffixes = std.objectFields(me._externalSecrets),
-    local esMountSuffixes = std.objectFields(me._externalSecretMounts),
-    local secretEnvs = std.flatMap(
-      function(suffix)
-        local es = me._externalSecrets[suffix];
-        local envs = if std.objectHas(es, 'envs') then es.envs else {};
-        local secretName = me._name + '-' + suffix;
-        std.map(
-          function(envName) { name: envName, secret: secretName, key: envs[envName] },
-          std.objectFields(envs)
-        ),
-      esSuffixes
-    ),
-
-    local hasRealPvs = std.length(std.filter(
-      function(mountPath) !(std.objectHas(me._pvs[mountPath], 'emptyDir') && me._pvs[mountPath].emptyDir),
-      std.objectFields(me._pvs)
-    )) > 0,
-
-    assert std.length(me._ports) > 0 :
-           "labsonnet '%s': at least one port is required" % me._name,
-
+    // Service ports
+    assert std.length(me._ports) > 0 : "labsonnet '%s': at least one port is required" % me._name,
     assert std.all(std.map(
       function(p) std.isObject(p) && std.objectHas(p, 'port') && std.isNumber(p.port),
       me._ports
     )) : "labsonnet '%s': each port entry must be an object with a numeric 'port' field" % me._name,
-
     assert std.all(std.map(
       function(p) std.length(portRoutingKeys(p)) <= 1,
       me._ports
     )) : "labsonnet '%s': each port entry may have at most one routing type" % me._name,
-
     assert std.all(std.map(
       function(p)
         local rkeys = portRoutingKeys(p);
@@ -143,10 +144,40 @@ local dedupPorts(ports) =
       me._ports
     )) : "labsonnet '%s': explicit 'protocol' conflicts with routing type" % me._name,
 
+    assert std.all(std.map(
+      function(pp)
+        !(pp.routingKey != null && routingMeta[pp.routingKey].layer == 'L7')
+        || pp.fqdn != null || me._fqdn != null,
+      processedPorts
+    )) : "labsonnet '%s': 'fqdn' is required for each L7 route (set per-route or service-level via withFqdn)" % me._name,
+
+    local processedPorts = std.map(processPort, me._ports),
+    local normalizedPorts = std.map(function(pp) pp.normalized, processedPorts),
     local portNames = std.map(function(p) p.name, normalizedPorts),
+
+    local uniquePorts = dedupPorts(normalizedPorts),
+    local routedPorts = std.filter(function(pp) pp.routingKey != null, processedPorts),
+
     assert std.length(portNames) == std.length(std.set(portNames)) :
            "labsonnet '%s': duplicate port name in ports" % me._name,
+    assert std.all(std.map(
+      function(pp)
+        if pp.routingKey != null && std.member(gatewayLib.routeKeys, pp.routingKey) then
+          local gw = if std.objectHas(pp.routingCfg, 'gateway') then pp.routingCfg.gateway else {};
+          std.objectHas(gw, 'name') && std.objectHas(gw, 'namespace')
+        else true,
+      processedPorts
+    )) : "labsonnet '%s': gateway routes require 'gateway.name' and 'gateway.namespace'" % me._name,
+    assert std.all(std.map(
+      function(pp)
+        if pp.routingKey != null && std.member(gatewayLib.routeKeys, pp.routingKey) && routingMeta[pp.routingKey].layer == 'L4' then
+          local gw = if std.objectHas(pp.routingCfg, 'gateway') then pp.routingCfg.gateway else {};
+          std.objectHas(gw, 'sectionName')
+        else true,
+      processedPorts
+    )) : "labsonnet '%s': L4 routes (tcpRoute/udpRoute) require 'gateway.sectionName'" % me._name,
 
+    // Workload Type
     assert me._type == 'Deployment' || me._type == 'StatefulSet' :
            "labsonnet '%s': unsupported type '%s' (must be 'Deployment' or 'StatefulSet')" % [me._name, me._type],
     assert !me._headlessService || me._type == 'StatefulSet' :
@@ -161,48 +192,26 @@ local dedupPorts(ports) =
     assert std.isNumber(me._runAsUser) :
            "labsonnet '%s': 'runAsUser' must be a number" % me._name,
 
-    assert std.all(std.map(
-      function(pp)
-        !(pp.routingKey != null && routingMeta[pp.routingKey].layer == 'L7')
-        || pp.fqdn != null || me._fqdn != null,
-      processedPorts
-    )) : "labsonnet '%s': 'fqdn' is required for each L7 route (set per-route or service-level via withFqdn)" % me._name,
-
-    assert std.all(std.map(
-      function(pp)
-        if pp.routingKey != null && std.member(gatewayLib.routeKeys, pp.routingKey) then
-          local gw = if std.objectHas(pp.routingCfg, 'gateway') then pp.routingCfg.gateway else {};
-          std.objectHas(gw, 'name') && std.objectHas(gw, 'namespace')
-        else true,
-      processedPorts
-    )) : "labsonnet '%s': gateway routes require 'gateway.name' and 'gateway.namespace'" % me._name,
-
-    assert std.all(std.map(
-      function(pp)
-        if pp.routingKey != null && std.member(gatewayLib.routeKeys, pp.routingKey) && routingMeta[pp.routingKey].layer == 'L4' then
-          local gw = if std.objectHas(pp.routingCfg, 'gateway') then pp.routingCfg.gateway else {};
-          std.objectHas(gw, 'sectionName')
-        else true,
-      processedPorts
-    )) : "labsonnet '%s': L4 routes (tcpRoute/udpRoute) require 'gateway.sectionName'" % me._name,
-
-    assert std.all(std.map(
-      function(mountPath) std.isObject(me._configMaps[mountPath]) && std.objectHas(me._configMaps[mountPath], 'name'),
-      std.objectFields(me._configMaps)
-    )) : "labsonnet '%s': each configMaps entry must be an object with a 'name' field" % me._name,
-
+    // Kubernetes Secrets
     assert std.all(std.map(
       function(mountPath) std.isObject(me._secrets[mountPath]) && std.objectHas(me._secrets[mountPath], 'name'),
       std.objectFields(me._secrets)
     )) : "labsonnet '%s': each secrets entry must be an object with a 'name' field" % me._name,
 
-    assert std.all(std.map(
-      function(mountPath)
-        local pv = me._pvs[mountPath];
-        (std.objectHas(pv, 'emptyDir') && pv.emptyDir) || std.objectHas(pv, 'size'),
-      std.objectFields(me._pvs)
-    )) : "labsonnet '%s': all pvs entries must have a 'size' field (unless 'emptyDir' is true)" % me._name,
-
+    // ExternalSecrets
+    local esSuffixes = std.objectFields(me._externalSecrets),
+    local esMountSuffixes = std.objectFields(me._externalSecretMounts),
+    local secretEnvs = std.flatMap(
+      function(suffix)
+        local es = me._externalSecrets[suffix];
+        local envs = if std.objectHas(es, 'envs') then es.envs else {};
+        local secretName = me._name + '-' + suffix;
+        std.map(
+          function(envName) { name: envName, secret: secretName, key: envs[envName] },
+          std.objectFields(envs)
+        ),
+      esSuffixes
+    ),
     assert std.all(std.map(
       function(suffix)
         local es = me._externalSecrets[suffix];
@@ -212,18 +221,31 @@ local dedupPorts(ports) =
         && (hasEnvs || hasMount),
       esSuffixes
     )) : "labsonnet '%s': each externalSecrets entry must have a non-empty 'store' string and either non-empty 'envs' object or a corresponding mount" % me._name,
-
     // Validate that every externalSecretMount suffix has a corresponding externalSecret
     assert std.all(std.map(
       function(suffix) std.member(esSuffixes, suffix),
       esMountSuffixes
     )) : "labsonnet '%s': each externalSecretMounts suffix must have a corresponding externalSecrets entry" % me._name,
 
-    // Validate resources structure if provided
-    assert me._resources == null || std.isObject(me._resources) :
-           "labsonnet '%s': 'resources' must be an object with 'requests' and/or 'limits'" % me._name,
+    // ConfigMaps
+    assert std.all(std.map(
+      function(mountPath) std.isObject(me._configMaps[mountPath]) && std.objectHas(me._configMaps[mountPath], 'name'),
+      std.objectFields(me._configMaps)
+    )) : "labsonnet '%s': each configMaps entry must be an object with a 'name' field" % me._name,
 
-    // Validate probes are objects if provided
+    // Persistent Volumes
+    local hasRealPvs = std.length(std.filter(
+      function(mountPath) !(std.objectHas(me._pvs[mountPath], 'emptyDir') && me._pvs[mountPath].emptyDir),
+      std.objectFields(me._pvs)
+    )) > 0,
+    assert std.all(std.map(
+      function(mountPath)
+        local pv = me._pvs[mountPath];
+        (std.objectHas(pv, 'emptyDir') && pv.emptyDir) || std.objectHas(pv, 'size'),
+      std.objectFields(me._pvs)
+    )) : "labsonnet '%s': all pvs entries must have a 'size' field (unless 'emptyDir' is true)" % me._name,
+
+    // Probes
     assert me._livenessProbe == null || std.isObject(me._livenessProbe) :
            "labsonnet '%s': 'livenessProbe' must be an object" % me._name,
     assert me._readinessProbe == null || std.isObject(me._readinessProbe) :
@@ -231,13 +253,17 @@ local dedupPorts(ports) =
     assert me._startupProbe == null || std.isObject(me._startupProbe) :
            "labsonnet '%s': 'startupProbe' must be an object" % me._name,
 
-    // Validate serviceMonitors reference existing port names
+    // Service Monitors
     assert std.all(std.map(
       function(monitorName)
         local mon = me._serviceMonitors[monitorName];
         std.member(portNames, mon.portName),
       std.objectFields(me._serviceMonitors)
     )) : "labsonnet '%s': each serviceMonitor must reference a valid port name" % me._name,
+
+    // Custom resources
+    assert me._resources == null || std.isObject(me._resources) :
+           "labsonnet '%s': 'resources' must be an object with 'requests' and/or 'limits'" % me._name,
 
     // Auto-derive serviceName from headless service when not explicitly set.
     local effectiveServiceName =
@@ -351,65 +377,221 @@ local dedupPorts(ports) =
 
   // --- Scalar overrides (last writer wins) ---
 
+  '#withFqdn':: d.fn(
+    help='Set the FQDN for the app',
+    args=[d.arg('fqdn', d.T.string)],
+  ),
   withFqdn(fqdn):: { _fqdn:: fqdn },
+  '#withType':: d.fn(
+    help='Set the workload type of the app (Deployment or StatefulSet)',
+    args=[d.arg('type', d.T.string)],
+  ),
   withType(type):: { _type:: type },
+  '#withReplicas':: d.fn(
+    help='Set the number of replicas for the app',
+    args=[d.arg('replicas', d.T.number)],
+  ),
   withReplicas(n):: { _replicas:: n },
+  '#withCommand':: d.fn(
+    help='Set the command for the app',
+    args=[d.arg('command', d.T.array)],
+  ),
   withCommand(cmd):: { _command:: cmd },
+  '#withArgs':: d.fn(
+    help='Set the arguments for the app',
+    args=[d.arg('args', d.T.array)],
+  ),
   withArgs(args):: { _args:: args },
+  '#withRunAsUser':: d.fn(
+    help='Set the UID & GID for the app',
+    args=[d.arg('uid', d.T.number)],
+  ),
   withRunAsUser(uid):: { _runAsUser:: uid },
+  '#withAffinity':: d.fn(
+    help='Set the affinity for the app - for more affinities check helpers/affinity.libsonnet',
+    args=[d.arg('affinity', d.T.object)],
+  ),
   withAffinity(aff):: { _affinity:: aff },
+  '#withServiceType':: d.fn(
+    help='Set the service type for the app (ClusterIP, NodePort, LoadBalancer, ExternalName)',
+    args=[d.arg('type', d.T.string)],
+  ),
   withServiceType(t):: { _serviceType:: t },
+  '#withCreateNamespace':: d.fn(
+    help='Set whether to create the namespace',
+    args=[d.arg('create', d.T.boolean, true)],
+  ),
   withCreateNamespace(create=true):: { _createNamespace:: create },
+  '#withNamespace':: d.fn(
+    help='Set the namespace for the app',
+    args=[d.arg('ns', d.T.string)],
+  ),
   withNamespace(ns):: { _namespace:: ns },
+  '#withHeadlessService':: d.fn(
+    help='Set whether to create a headless service',
+    args=[d.arg('headless', d.T.boolean, true)],
+  ),
   withHeadlessService(publishNotReadyAddresses=true):: {
     _headlessService:: true,
     _headlessPublishNotReady:: publishNotReadyAddresses,
   },
+  '#withServiceName':: d.fn(
+    help='Set the name for the new kubernetes service',
+    args=[d.arg('name', d.T.string)],
+  ),
   withServiceName(name):: { _serviceName:: name },
+  '#withPodManagementPolicy':: d.fn(
+    help='Set the pod management policy for the app',
+    args=[d.arg('policy', d.T.string)],
+  ),
   withPodManagementPolicy(policy):: { _podManagementPolicy:: policy },
 
-  // Resources: { requests: { cpu, memory }, limits: { cpu, memory } }
+  '#withResources':: d.fn(
+    help='Set the resource requirements for the app - `{ requests: { cpu, memory }, limits: { cpu, memory } }`',
+    args=[d.arg('resources', d.T.object)],
+  ),
   withResources(resources):: { _resources:: resources },
 
-  // Probes: raw Kubernetes probe objects
-  // e.g. { httpGet: { path: '/healthz', port: 8080 }, initialDelaySeconds: 10, periodSeconds: 30 }
+  '#withLivenessProbe':: d.fn(
+    help="Set the liveness probe for the app - e.g. `{ httpGet: { path: '/healthz', port: 8080 }, initialDelaySeconds: 10, periodSeconds: 30 }`",
+    args=[d.arg('probe', d.T.object)],
+  ),
   withLivenessProbe(probe):: { _livenessProbe:: probe },
+  '#withReadinessProbe':: d.fn(
+    help="Set the readiness probe for the app - e.g. `{ httpGet: { path: '/readyz', port: 8080 }, initialDelaySeconds: 10, periodSeconds: 30 }`",
+    args=[d.arg('probe', d.T.object)],
+  ),
   withReadinessProbe(probe):: { _readinessProbe:: probe },
+  '#withStartupProbe':: d.fn(
+    help="Set the startup probe for the app - e.g. `{ httpGet: { path: '/startupz', port: 8080 }, initialDelaySeconds: 10, periodSeconds: 30 }`",
+    args=[d.arg('probe', d.T.object)],
+  ),
   withStartupProbe(probe):: { _startupProbe:: probe },
 
   // Security context overrides (merged with defaults)
-  // Container-level: overrides runAsNonRoot, runAsUser, capabilities, etc.
+  '#withSecurityContext':: d.fn(
+    help='Set the security context for the app - runAsNonRoot, runAsUser, capabilities, etc.',
+    args=[d.arg('ctx', d.T.object)],
+  ),
   withSecurityContext(ctx):: { _securityContext:: ctx },
   // Pod-level: overrides fsGroup, runAsNonRoot, supplementalGroups, etc.
+  '#withPodSecurityContext':: d.fn(
+    help='Set the pod-level security context overrides',
+    args=[d.arg('ctx', d.T.object)],
+  ),
   withPodSecurityContext(ctx):: { _podSecurityContext:: ctx },
 
   // --- Merge/append accumulators ---
 
+  '#withPort':: d.fn(
+    help='Add a port to the app',
+    args=[d.arg('portEntry', d.T.object)],
+  ),
   withPort(portEntry):: { _ports+:: [portEntry] },
+  '#withPV':: d.fn(
+    help='Add a persistent volume mount to the app',
+    args=[
+      d.arg('mountPath', d.T.string),
+      d.arg('pvConfig', d.T.object),
+    ],
+  ),
   withPV(mountPath, pvConfig):: { _pvs+:: { [mountPath]: pvConfig } },
+  '#withEmptyDir':: d.fn(
+    help='Add an emptyDir volume mount to the app',
+    args=[d.arg('mountPath', d.T.string)],
+  ),
   withEmptyDir(mountPath):: { _pvs+:: { [mountPath]: { emptyDir: true } } },
+  '#withConfigMap':: d.fn(
+    help='Add a configMap volume mount to the app',
+    args=[
+      d.arg('mountPath', d.T.string),
+      d.arg('name', d.T.string),
+      d.arg('readOnly', d.T.boolean, true),
+    ],
+  ),
   withConfigMap(mountPath, name, readOnly=true):: {
     _configMaps+:: { [mountPath]: { name: name, readOnly: readOnly } },
   },
+  '#withSecretMount':: d.fn(
+    help='Add a secret volume mount to the app',
+    args=[
+      d.arg('mountPath', d.T.string),
+      d.arg('name', d.T.string),
+      d.arg('readOnly', d.T.boolean, true),
+    ],
+  ),
   withSecretMount(mountPath, name, readOnly=true):: {
     _secrets+:: { [mountPath]: { name: name, readOnly: readOnly } },
   },
+  '#withEnv':: d.fn(
+    help='Add environment variables to the app',
+    args=[d.arg('env', d.T.object)],
+  ),
   withEnv(env):: { _env+:: env },
+  '#withFieldRefEnv':: d.fn(
+    help='Add environment variable references to the app',
+    args=[d.arg('envs', d.T.object)],
+  ),
   withFieldRefEnv(envs):: { _fieldRefEnvs+:: envs },
+  '#withExternalSecret':: d.fn(
+    help='Add an external secret to the app',
+    args=[
+      d.arg('suffix', d.T.string),
+      d.arg('cfg', d.T.object),
+    ],
+  ),
   withExternalSecret(suffix, cfg):: { _externalSecrets+:: { [suffix]: cfg } },
+  '#withExternalSecretMount':: d.fn(
+    help='Add an external secret mount to the app',
+    args=[
+      d.arg('suffix', d.T.string),
+      d.arg('mountPath', d.T.string),
+      d.arg('readOnly', d.T.boolean, default=true),
+    ],
+  ),
   withExternalSecretMount(suffix, mountPath, readOnly=true):: {
     _externalSecretMounts+:: { [suffix]: { mountPath: mountPath, readOnly: readOnly } },
   },
-  withImagePullSecrets(s):: { _imagePullSecrets+:: s },
-  withNamespaceLabels(l):: { _namespaceLabels+:: l },
-  withNamespaceAnnotations(a):: { _namespaceAnnotations+:: a },
+  '#withImagePullSecrets':: d.fn(
+    help='Add image pull secrets to the app',
+    args=[d.arg('secrets', d.T.array)],
+  ),
+  withImagePullSecrets(secrets):: { _imagePullSecrets+:: secrets },
+  '#withNamespaceLabels':: d.fn(
+    help='Add namespace labels to the app',
+    args=[d.arg('labels', d.T.object)],
+  ),
+  withNamespaceLabels(labels):: { _namespaceLabels+:: labels },
+  '#withNamespaceAnnotations':: d.fn(
+    help='Add namespace annotations to the app',
+    args=[d.arg('annotations', d.T.object)],
+  ),
+  withNamespaceAnnotations(annotations):: { _namespaceAnnotations+:: annotations },
 
   // Pod template labels/annotations (distinct from namespace labels/annotations)
+  '#withPodLabels':: d.fn(
+    help='Add pod labels to the app',
+    args=[d.arg('labels', d.T.object)],
+  ),
   withPodLabels(l):: { _podLabels+:: l },
-  withPodAnnotations(a):: { _podAnnotations+:: a },
+  '#withPodAnnotations':: d.fn(
+    help='Add pod annotations to the app',
+    args=[d.arg('annotations', d.T.object)],
+  ),
+  withPodAnnotations(annotations):: { _podAnnotations+:: annotations },
 
-  // ServiceMonitor for Prometheus/VictoriaMetrics scraping.
-  // portName must match a port name from withPort(). name defaults to portName.
+  '#withServiceMonitor':: d.fn(
+    help=|||
+      Add ServiceMonitor for Prometheus/VictoriaMetrics scraping.
+      portName must match a port name from withPort(). name defaults to portName.
+    |||,
+    args=[
+      d.arg('portName', d.T.string),
+      d.arg('path', d.T.string),
+      d.arg('interval', d.T.string),
+      d.arg('name', d.T.string),
+    ],
+  ),
   withServiceMonitor(portName='metrics', path='/metrics', interval='30s', name=null):: {
     _serviceMonitors+:: {
       [if name != null then name else portName]: {
