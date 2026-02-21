@@ -94,6 +94,7 @@ local dedupPorts(ports) =
     _affinity:: null,
     _command:: null,
     _args:: null,
+    _initContainers:: [],
     _runAsUser:: 1000,
     _serviceType:: 'ClusterIP',
     _headlessService:: false,
@@ -101,6 +102,7 @@ local dedupPorts(ports) =
     _serviceName:: null,
     _podManagementPolicy:: null,
     _fieldRefEnvs:: {},
+    _secretEnvs:: {},
     _ports:: [],
     _pvs:: {},
     _configMaps:: {},
@@ -144,6 +146,7 @@ local dedupPorts(ports) =
       me._ports
     )) : "labsonnet '%s': explicit 'protocol' conflicts with routing type" % me._name,
 
+    local processedPorts = std.map(processPort, me._ports),
     assert std.all(std.map(
       function(pp)
         !(pp.routingKey != null && routingMeta[pp.routingKey].layer == 'L7')
@@ -151,7 +154,6 @@ local dedupPorts(ports) =
       processedPorts
     )) : "labsonnet '%s': 'fqdn' is required for each L7 route (set per-route or service-level via withFqdn)" % me._name,
 
-    local processedPorts = std.map(processPort, me._ports),
     local normalizedPorts = std.map(function(pp) pp.normalized, processedPorts),
     local portNames = std.map(function(p) p.name, normalizedPorts),
 
@@ -211,6 +213,11 @@ local dedupPorts(ports) =
           std.objectFields(envs)
         ),
       esSuffixes
+    ) + std.map(
+      function(envName)
+        local ref = me._secretEnvs[envName];
+        { name: envName, secret: ref.name, key: ref.key },
+      std.objectFields(me._secretEnvs)
     ),
     assert std.all(std.map(
       function(suffix)
@@ -226,6 +233,14 @@ local dedupPorts(ports) =
       function(suffix) std.member(esSuffixes, suffix),
       esMountSuffixes
     )) : "labsonnet '%s': each externalSecretMounts suffix must have a corresponding externalSecrets entry" % me._name,
+    assert std.all(std.map(
+      function(envName)
+        local ref = me._secretEnvs[envName];
+        std.isObject(ref)
+        && std.objectHas(ref, 'name') && std.isString(ref.name) && std.length(ref.name) > 0
+        && std.objectHas(ref, 'key') && std.isString(ref.key) && std.length(ref.key) > 0,
+      std.objectFields(me._secretEnvs)
+    )) : "labsonnet '%s': each withSecretEnv entry must be { ENV_NAME: { name: secretName, key: secretKey } }" % me._name,
 
     // ConfigMaps
     assert std.all(std.map(
@@ -279,6 +294,7 @@ local dedupPorts(ports) =
       affinity: me._affinity,
       command: me._command,
       args: me._args,
+      initContainers: me._initContainers,
       runAsUser: me._runAsUser,
       serviceType: me._serviceType,
       headlessPublishNotReady: me._headlessPublishNotReady,
@@ -402,6 +418,11 @@ local dedupPorts(ports) =
     args=[d.arg('args', d.T.array)],
   ),
   withArgs(args):: { _args:: args },
+  '#withInitContainer':: d.fn(
+    help='Add an init container to the app',
+    args=[d.arg('container', d.T.object)],
+  ),
+  withInitContainer(container):: { _initContainers+:: [container] },
   '#withRunAsUser':: d.fn(
     help='Set the UID & GID for the app',
     args=[d.arg('uid', d.T.number)],
@@ -533,6 +554,11 @@ local dedupPorts(ports) =
     args=[d.arg('envs', d.T.object)],
   ),
   withFieldRefEnv(envs):: { _fieldRefEnvs+:: envs },
+  '#withSecretEnv':: d.fn(
+    help='Add environment variables from existing Kubernetes Secrets',
+    args=[d.arg('envs', d.T.object)],
+  ),
+  withSecretEnv(envs):: { _secretEnvs+:: envs },
   '#withExternalSecret':: d.fn(
     help='Add an external secret to the app',
     args=[

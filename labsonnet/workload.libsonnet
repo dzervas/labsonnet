@@ -111,6 +111,22 @@ local volumeMount = k.core.v1.volumeMount;
       + (if cfg.readinessProbe != null then { readinessProbe: cfg.readinessProbe } else {})
       + (if cfg.startupProbe != null then { startupProbe: cfg.startupProbe } else {});
 
+    local inheritedInitContainers =
+      if std.objectHas(cfg, 'initContainers') && std.length(cfg.initContainers) > 0 then
+        std.map(
+          function(ic)
+            ic {
+              volumeMounts:
+                (if std.objectHas(ctr, 'volumeMounts') then ctr.volumeMounts else [])
+                + (if std.objectHas(ic, 'volumeMounts') then ic.volumeMounts else []),
+              env:
+                (if std.objectHas(ctr, 'env') then ctr.env else [])
+                + (if std.objectHas(ic, 'env') then ic.env else []),
+            },
+          cfg.initContainers
+        )
+      else [];
+
     local configMaps = std.foldl(
       function(prev, mountPath)
         local cm = cfg.configMaps[mountPath];
@@ -148,6 +164,9 @@ local volumeMount = k.core.v1.volumeMount;
        then workload.spec.template.spec.withImagePullSecrets(
          std.map(function(s) { name: s }, cfg.imagePullSecrets)
        )
+       else {})
+    + (if std.length(inheritedInitContainers) > 0
+       then { spec+: { template+: { spec+: { initContainers: inheritedInitContainers } } } }
        else {})
     + defaultPodSecCtx
     + podSecCtxOverride
