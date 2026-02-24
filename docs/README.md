@@ -20,7 +20,7 @@ local labsonnet = import "https://github.com/dzervas/labsonnet/labsonnet/main.li
 * [`fn withAffinity(affinity)`](#fn-withaffinity)
 * [`fn withArgs(args)`](#fn-withargs)
 * [`fn withCommand(command)`](#fn-withcommand)
-* [`fn withConfigMap(mountPath, name, readOnly=true)`](#fn-withconfigmap)
+* [`fn withConfigMapMount(mountPath, name, readOnly=true)`](#fn-withconfigmapmount)
 * [`fn withCreateNamespace(create=true)`](#fn-withcreatenamespace)
 * [`fn withEmptyDir(mountPath)`](#fn-withemptydir)
 * [`fn withEnv(env)`](#fn-withenv)
@@ -110,10 +110,10 @@ PARAMETERS:
 * **command** (`array`)
 
 Set the command for the app
-### fn withConfigMap
+### fn withConfigMapMount
 
 ```jsonnet
-withConfigMap(mountPath, name, readOnly=true)
+withConfigMapMount(mountPath, name, readOnly=true)
 ```
 
 PARAMETERS:
