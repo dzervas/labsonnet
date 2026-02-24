@@ -105,7 +105,7 @@ local dedupPorts(ports) =
     _secretEnvs:: {},
     _ports:: [],
     _pvs:: {},
-    _configMaps:: {},
+    _configMapMounts:: {},
     _secrets:: {},
     _env:: {},
     _externalSecrets:: {},
@@ -244,9 +244,9 @@ local dedupPorts(ports) =
 
     // ConfigMaps
     assert std.all(std.map(
-      function(mountPath) std.isObject(me._configMaps[mountPath]) && std.objectHas(me._configMaps[mountPath], 'name'),
-      std.objectFields(me._configMaps)
-    )) : "labsonnet '%s': each configMaps entry must be an object with a 'name' field" % me._name,
+      function(mountPath) std.isObject(me._configMapMounts[mountPath]) && std.objectHas(me._configMapMounts[mountPath], 'name'),
+      std.objectFields(me._configMapMounts)
+    )) : "labsonnet '%s': each configMapMounts entry must be an object with a 'name' field" % me._name,
 
     // Persistent Volumes
     local hasRealPvs = std.length(std.filter(
@@ -303,7 +303,7 @@ local dedupPorts(ports) =
       fieldRefEnvs: me._fieldRefEnvs,
       ports: uniquePorts,
       pvs: me._pvs,
-      configMaps: me._configMaps,
+      configMapMounts: me._configMapMounts,
       secrets: me._secrets,
       env: me._env,
       externalSecrets: me._externalSecrets,
@@ -522,7 +522,7 @@ local dedupPorts(ports) =
     args=[d.arg('mountPath', d.T.string)],
   ),
   withEmptyDir(mountPath):: { _pvs+:: { [mountPath]: { emptyDir: true } } },
-  '#withConfigMap':: d.fn(
+  '#withConfigMapMount':: d.fn(
     help='Add a configMap volume mount to the app',
     args=[
       d.arg('mountPath', d.T.string),
@@ -530,8 +530,8 @@ local dedupPorts(ports) =
       d.arg('readOnly', d.T.boolean, true),
     ],
   ),
-  withConfigMap(mountPath, name, readOnly=true):: {
-    _configMaps+:: { [mountPath]: { name: name, readOnly: readOnly } },
+  withConfigMapMount(mountPath, name, readOnly=true):: {
+    _configMapMounts+:: { [mountPath]: { name: name, readOnly: readOnly } },
   },
   '#withSecretMount':: d.fn(
     help='Add a secret volume mount to the app',

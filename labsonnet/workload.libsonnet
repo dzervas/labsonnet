@@ -127,9 +127,9 @@ local volumeMount = k.core.v1.volumeMount;
         )
       else [];
 
-    local configMaps = std.foldl(
+    local configMapMounts = std.foldl(
       function(prev, mountPath)
-        local cm = cfg.configMaps[mountPath];
+        local cm = cfg.configMapMounts[mountPath];
         local readOnly = if std.objectHas(cm, 'readOnly') then cm.readOnly else true;
         prev + workload.configVolumeMount(
           cm.name,
@@ -137,7 +137,7 @@ local volumeMount = k.core.v1.volumeMount;
           volumeMountMixin=volumeMount.withReadOnly(readOnly),
           volumeMixin=volume.configMap.withDefaultMode(std.parseOctal(if readOnly then '444' else '666'))
         ),
-      std.objectFields(cfg.configMaps),
+      std.objectFields(cfg.configMapMounts),
       {}
     );
 
@@ -157,7 +157,7 @@ local volumeMount = k.core.v1.volumeMount;
          + (if cfg.serviceName != null then workload.spec.withServiceName(cfg.serviceName) else {})
          + (if cfg.podManagementPolicy != null then workload.spec.withPodManagementPolicy(cfg.podManagementPolicy) else {})
        else {})
-    + configMaps
+    + configMapMounts
     + (if cfg.affinity != null then affinity.withWorkloadAffinity(cfg.affinity) else {})
     + workload.metadata.withNamespace(cfg.namespace)
     + (if std.length(cfg.imagePullSecrets) > 0
