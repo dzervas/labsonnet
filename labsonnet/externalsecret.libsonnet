@@ -1,13 +1,12 @@
-// ExternalSecret resource builder — wraps helpers/externalsecret.libsonnet with labsonnet naming.
+// ExternalSecret resource builder — wraps helpers/externalsecret.libsonnet.
 
 local externalSecretHelper = import 'helpers/externalsecret.libsonnet';
 
 {
-  new(name, namespace, suffix, storeName, storeKind='ClusterSecretStore', remoteKey=null)::
-    local secretName = name + '-' + suffix;
+  new(name, namespace, storeName, storeKind='ClusterSecretStore', remoteKey=null)::
     local key = if remoteKey != null then remoteKey else name;
 
-    externalSecretHelper.new(secretName,
+    externalSecretHelper.new(name,
                              namespace,
                              storeName,
                              storeKind,

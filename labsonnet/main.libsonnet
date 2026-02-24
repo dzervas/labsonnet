@@ -201,18 +201,17 @@ local dedupPorts(ports) =
     )) : "labsonnet '%s': each secrets entry must be an object with a 'name' field" % me._name,
 
     // ExternalSecrets
-    local esSuffixes = std.objectFields(me._externalSecrets),
-    local esMountSuffixes = std.objectFields(me._externalSecretMounts),
+    local esNames = std.objectFields(me._externalSecrets),
+    local esMountNames = std.objectFields(me._externalSecretMounts),
     local secretEnvs = std.flatMap(
-      function(suffix)
-        local es = me._externalSecrets[suffix];
+      function(secretName)
+        local es = me._externalSecrets[secretName];
         local envs = if std.objectHas(es, 'envs') then es.envs else {};
-        local secretName = me._name + '-' + suffix;
         std.map(
           function(envName) { name: envName, secret: secretName, key: envs[envName] },
           std.objectFields(envs)
         ),
-      esSuffixes
+      esNames
     ) + std.map(
       function(envName)
         local ref = me._secretEnvs[envName];
@@ -220,19 +219,14 @@ local dedupPorts(ports) =
       std.objectFields(me._secretEnvs)
     ),
     assert std.all(std.map(
-      function(suffix)
-        local es = me._externalSecrets[suffix];
+      function(secretName)
+        local es = me._externalSecrets[secretName];
         local hasEnvs = std.objectHas(es, 'envs') && std.isObject(es.envs) && std.length(std.objectFields(es.envs)) > 0;
-        local hasMount = std.member(esMountSuffixes, suffix);
+        local hasMount = std.member(esMountNames, secretName);
         std.objectHas(es, 'store') && std.isString(es.store) && std.length(es.store) > 0
         && (hasEnvs || hasMount),
-      esSuffixes
+      esNames
     )) : "labsonnet '%s': each externalSecrets entry must have a non-empty 'store' string and either non-empty 'envs' object or a corresponding mount" % me._name,
-    // Validate that every externalSecretMount suffix has a corresponding externalSecret
-    assert std.all(std.map(
-      function(suffix) std.member(esSuffixes, suffix),
-      esMountSuffixes
-    )) : "labsonnet '%s': each externalSecretMounts suffix must have a corresponding externalSecrets entry" % me._name,
     assert std.all(std.map(
       function(envName)
         local ref = me._secretEnvs[envName];
@@ -366,15 +360,14 @@ local dedupPorts(ports) =
     pvc: if me._type == 'Deployment' then pvcLib.build(me._name, me._namespace, me._pvs, me._labels) else null,
 
     externalSecrets: {
-      [suffix]: externalSecretLib.new(
-        name=me._name,
+      [secretName]: externalSecretLib.new(
+        name=secretName,
         namespace=me._namespace,
-        suffix=suffix,
-        storeName=me._externalSecrets[suffix].store,
-        storeKind=if std.objectHas(me._externalSecrets[suffix], 'storeKind') then me._externalSecrets[suffix].storeKind else 'ClusterSecretStore',
-        remoteKey=if std.objectHas(me._externalSecrets[suffix], 'remoteKey') then me._externalSecrets[suffix].remoteKey else null,
+        storeName=me._externalSecrets[secretName].store,
+        storeKind=if std.objectHas(me._externalSecrets[secretName], 'storeKind') then me._externalSecrets[secretName].storeKind else 'ClusterSecretStore',
+        remoteKey=if std.objectHas(me._externalSecrets[secretName], 'remoteKey') then me._externalSecrets[secretName].remoteKey else null,
       )
-      for suffix in esSuffixes
+      for secretName in esNames
     },
 
     monitors: {
@@ -559,24 +552,27 @@ local dedupPorts(ports) =
     args=[d.arg('envs', d.T.object)],
   ),
   withSecretEnv(envs):: { _secretEnvs+:: envs },
-  '#withExternalSecret':: d.fn(
-    help='Add an external secret to the app',
+  '#withExternalSecretEnvs':: d.fn(
+    help='Add an external secret with environment variable mappings. cfg = { store: string, storeKind?: string, remoteKey?: string }',
     args=[
-      d.arg('suffix', d.T.string),
+      d.arg('name', d.T.string),
+      d.arg('envs', d.T.object),
       d.arg('cfg', d.T.object),
     ],
   ),
-  withExternalSecret(suffix, cfg):: { _externalSecrets+:: { [suffix]: cfg } },
+  withExternalSecretEnvs(name, envs, cfg):: { _externalSecrets+:: { [name]+: cfg { envs: envs } } },
   '#withExternalSecretMount':: d.fn(
-    help='Add an external secret mount to the app',
+    help='Add an external secret mounted as a volume. cfg = { store: string, storeKind?: string, remoteKey?: string }',
     args=[
-      d.arg('suffix', d.T.string),
+      d.arg('name', d.T.string),
       d.arg('mountPath', d.T.string),
+      d.arg('cfg', d.T.object),
       d.arg('readOnly', d.T.boolean, default=true),
     ],
   ),
-  withExternalSecretMount(suffix, mountPath, readOnly=true):: {
-    _externalSecretMounts+:: { [suffix]: { mountPath: mountPath, readOnly: readOnly } },
+  withExternalSecretMount(name, mountPath, cfg, readOnly=true):: {
+    _externalSecrets+:: { [name]+: cfg },
+    _externalSecretMounts+:: { [name]: { mountPath: mountPath, readOnly: readOnly } },
   },
   '#withImagePullSecrets':: d.fn(
     help='Add image pull secrets to the app',

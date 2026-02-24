@@ -24,8 +24,8 @@ local labsonnet = import "https://github.com/dzervas/labsonnet/labsonnet/main.li
 * [`fn withCreateNamespace(create=true)`](#fn-withcreatenamespace)
 * [`fn withEmptyDir(mountPath)`](#fn-withemptydir)
 * [`fn withEnv(env)`](#fn-withenv)
-* [`fn withExternalSecret(suffix, cfg)`](#fn-withexternalsecret)
-* [`fn withExternalSecretMount(suffix, mountPath, readOnly=true)`](#fn-withexternalsecretmount)
+* [`fn withExternalSecretEnvs(name, envs, cfg)`](#fn-withexternalsecretenvs)
+* [`fn withExternalSecretMount(name, mountPath, cfg, readOnly=true)`](#fn-withexternalsecretmount)
 * [`fn withFieldRefEnv(envs)`](#fn-withfieldrefenv)
 * [`fn withFqdn(fqdn)`](#fn-withfqdn)
 * [`fn withHeadlessService(headless=true)`](#fn-withheadlessservice)
@@ -160,32 +160,34 @@ PARAMETERS:
 * **env** (`object`)
 
 Add environment variables to the app
-### fn withExternalSecret
+### fn withExternalSecretEnvs
 
 ```jsonnet
-withExternalSecret(suffix, cfg)
+withExternalSecretEnvs(name, envs, cfg)
 ```
 
 PARAMETERS:
 
-* **suffix** (`string`)
+* **name** (`string`)
+* **envs** (`object`)
 * **cfg** (`object`)
 
-Add an external secret to the app
+Add an external secret with environment variable mappings. cfg = { store: string, storeKind?: string, remoteKey?: string }
 ### fn withExternalSecretMount
 
 ```jsonnet
-withExternalSecretMount(suffix, mountPath, readOnly=true)
+withExternalSecretMount(name, mountPath, cfg, readOnly=true)
 ```
 
 PARAMETERS:
 
-* **suffix** (`string`)
+* **name** (`string`)
 * **mountPath** (`string`)
+* **cfg** (`object`)
 * **readOnly** (`bool`)
    - default value: `true`
 
-Add an external secret mount to the app
+Add an external secret mounted as a volume. cfg = { store: string, storeKind?: string, remoteKey?: string }
 ### fn withFieldRefEnv
 
 ```jsonnet
