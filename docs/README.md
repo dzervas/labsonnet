@@ -30,6 +30,7 @@ local labsonnet = import "https://github.com/dzervas/labsonnet/labsonnet/main.li
 * [`fn withFqdn(fqdn)`](#fn-withfqdn)
 * [`fn withHeadlessService(headless=true)`](#fn-withheadlessservice)
 * [`fn withImagePullSecrets(secrets)`](#fn-withimagepullsecrets)
+* [`fn withInitContainer(container)`](#fn-withinitcontainer)
 * [`fn withLivenessProbe(probe)`](#fn-withlivenessprobe)
 * [`fn withNamespace(ns)`](#fn-withnamespace)
 * [`fn withNamespaceAnnotations(annotations)`](#fn-withnamespaceannotations)
@@ -44,6 +45,7 @@ local labsonnet = import "https://github.com/dzervas/labsonnet/labsonnet/main.li
 * [`fn withReplicas(replicas)`](#fn-withreplicas)
 * [`fn withResources(resources)`](#fn-withresources)
 * [`fn withRunAsUser(uid)`](#fn-withrunasuser)
+* [`fn withSecretEnv(envs)`](#fn-withsecretenv)
 * [`fn withSecretMount(mountPath, name, readOnly=true)`](#fn-withsecretmount)
 * [`fn withSecurityContext(ctx)`](#fn-withsecuritycontext)
 * [`fn withServiceMonitor(portName, path, interval, name)`](#fn-withservicemonitor)
@@ -229,6 +231,17 @@ PARAMETERS:
 * **secrets** (`array`)
 
 Add image pull secrets to the app
+### fn withInitContainer
+
+```jsonnet
+withInitContainer(container)
+```
+
+PARAMETERS:
+
+* **container** (`object`)
+
+Add an init container to the app
 ### fn withLivenessProbe
 
 ```jsonnet
@@ -384,6 +397,17 @@ PARAMETERS:
 * **uid** (`number`)
 
 Set the UID & GID for the app
+### fn withSecretEnv
+
+```jsonnet
+withSecretEnv(envs)
+```
+
+PARAMETERS:
+
+* **envs** (`object`)
+
+Add environment variables from existing Kubernetes Secrets
 ### fn withSecretMount
 
 ```jsonnet
