@@ -25,7 +25,7 @@ local volumeMount = k.core.v1.volumeMount;
       std.objectFields(cfg.pvs)
     );
 
-    local pvMounts = std.map(
+    local pvVolumeMounts = std.map(
       function(mountPath)
         local volName = pvcLib.volumeName(name, mountPath, cfg.pvs[mountPath]);
         local readOnly = std.objectHas(cfg.pvs[mountPath], 'readOnly') && cfg.pvs[mountPath].readOnly;
@@ -38,31 +38,29 @@ local volumeMount = k.core.v1.volumeMount;
       std.objectFields(cfg.secrets)
     );
 
-    local secretMounts = std.map(
+    local secretVolumeMounts = std.map(
       function(mountPath)
         local s = cfg.secrets[mountPath];
         volumeMount.new(s.name, mountPath, if std.objectHas(s, 'readOnly') then s.readOnly else true),
       std.objectFields(cfg.secrets)
     );
 
-    // External secret mount volumes and mounts
-    local esMountSuffixes = std.objectFields(cfg.externalSecretMounts);
-    local esMountVolumes = std.map(
-      function(suffix)
-        local secretName = name + '-' + suffix;
+    // External secrets mounted as volumes
+    local extSecretNames = std.objectFields(cfg.externalSecretMounts);
+    local extSecretVolumes = std.map(
+      function(secretName)
         volume.fromSecret(secretName, secretName),
-      esMountSuffixes
+      extSecretNames
     );
-    local esMountMounts = std.map(
-      function(suffix)
-        local esm = cfg.externalSecretMounts[suffix];
-        local secretName = name + '-' + suffix;
+    local extSecretVolumeMounts = std.map(
+      function(secretName)
+        local esm = cfg.externalSecretMounts[secretName];
         local readOnly = if std.objectHas(esm, 'readOnly') then esm.readOnly else true;
         volumeMount.new(secretName, esm.mountPath, readOnly),
-      esMountSuffixes
+      extSecretNames
     );
 
-    local allVolumes = pvVolumes + secretVolumes + esMountVolumes;
+    local allVolumes = pvVolumes + secretVolumes + extSecretVolumes;
     local podVolumes = if cfg.type == 'Deployment' then allVolumes
     else std.filter(function(v) !std.objectHas(v, 'persistentVolumeClaim'), allVolumes);
 
@@ -99,7 +97,7 @@ local volumeMount = k.core.v1.volumeMount;
         function(p) port.new(p.port) + port.withProtocol(p.protocol) + port.withName(p.name),
         cfg.ports
       ))
-      + container.withVolumeMounts(pvMounts + secretMounts + esMountMounts)
+      + container.withVolumeMounts(pvVolumeMounts + secretVolumeMounts + extSecretVolumeMounts)
       + container.withEnv(secretEnvVars + fieldRefEnvVars)
       + container.withEnvMap(cfg.env)
       + (if cfg.command != null then container.withCommand(cfg.command) else {})
