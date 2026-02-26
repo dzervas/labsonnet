@@ -172,7 +172,7 @@ PARAMETERS:
 * **envs** (`object`)
 * **cfg** (`object`)
 
-Add an external secret with environment variable mappings. cfg = { store: string, storeKind?: string, remoteKey?: string }
+Add an external secret with environment variable mappings. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string }
 ### fn withExternalSecretMount
 
 ```jsonnet
@@ -187,7 +187,7 @@ PARAMETERS:
 * **readOnly** (`bool`)
    - default value: `true`
 
-Add an external secret mounted as a volume. cfg = { store: string, storeKind?: string, remoteKey?: string }
+Add an external secret mounted as a volume. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string }
 ### fn withFieldRefEnv
 
 ```jsonnet
