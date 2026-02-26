@@ -360,14 +360,19 @@ local dedupPorts(ports) =
     pvc: if me._type == 'Deployment' then pvcLib.build(me._name, me._namespace, me._pvs, me._labels) else null,
 
     externalSecrets: {
-      [secretName]: externalSecretLib.new(
-        name=secretName,
-        namespace=me._namespace,
-        storeName=me._externalSecrets[secretName].store,
-        storeKind=if std.objectHas(me._externalSecrets[secretName], 'storeKind') then me._externalSecrets[secretName].storeKind else 'ClusterSecretStore',
-        remoteKey=if std.objectHas(me._externalSecrets[secretName], 'remoteKey') then me._externalSecrets[secretName].remoteKey else null,
-        refreshInterval=if std.objectHas(me._externalSecrets[secretName], 'refreshInterval') then me._externalSecrets[secretName].refreshInterval else null,
-      )
+      [secretName]:
+        local es = me._externalSecrets[secretName];
+        externalSecretLib.new(
+          name=secretName,
+          namespace=me._namespace,
+          storeName=es.store,
+          storeKind=if std.objectHas(es, 'storeKind') then es.storeKind else 'ClusterSecretStore',
+          remoteKey=if std.objectHas(es, 'remoteKey') then es.remoteKey else null,
+          refreshInterval=if std.objectHas(es, 'refreshInterval') then es.refreshInterval else null,
+          refreshPolicy=if std.objectHas(es, 'refreshPolicy') then es.refreshPolicy else null,
+          creationPolicy=if std.objectHas(es, 'creationPolicy') then es.creationPolicy else null,
+          deletionPolicy=if std.objectHas(es, 'deletionPolicy') then es.deletionPolicy else null,
+        )
       for secretName in esNames
     },
 
@@ -554,7 +559,7 @@ local dedupPorts(ports) =
   ),
   withSecretEnv(envs):: { _secretEnvs+:: envs },
   '#withExternalSecretEnvs':: d.fn(
-    help='Add an external secret with environment variable mappings. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string }',
+    help='Add an external secret with environment variable mappings. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }',
     args=[
       d.arg('name', d.T.string),
       d.arg('envs', d.T.object),
@@ -563,7 +568,7 @@ local dedupPorts(ports) =
   ),
   withExternalSecretEnvs(name, envs, cfg):: { _externalSecrets+:: { [name]+: cfg { envs: envs } } },
   '#withExternalSecretMount':: d.fn(
-    help='Add an external secret mounted as a volume. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string }',
+    help='Add an external secret mounted as a volume. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }',
     args=[
       d.arg('name', d.T.string),
       d.arg('mountPath', d.T.string),

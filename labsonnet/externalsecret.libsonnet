@@ -3,7 +3,7 @@
 local externalSecretHelper = import 'helpers/externalsecret.libsonnet';
 
 {
-  new(name, namespace, storeName, storeKind='ClusterSecretStore', remoteKey=null, refreshInterval=null)::
+  new(name, namespace, storeName, storeKind='ClusterSecretStore', remoteKey=null, refreshInterval=null, refreshPolicy=null, creationPolicy=null, deletionPolicy=null)::
     local key = if remoteKey != null then remoteKey else name;
 
     externalSecretHelper.new(name,
@@ -11,5 +11,8 @@ local externalSecretHelper = import 'helpers/externalsecret.libsonnet';
                              storeName,
                              storeKind,
                              dataFrom=[{ extract: { key: key } }],
-                             refreshInterval=refreshInterval),
+                             refreshInterval=refreshInterval,
+                             refreshPolicy=refreshPolicy,
+                             creationPolicy=creationPolicy,
+                             deletionPolicy=deletionPolicy),
 }
