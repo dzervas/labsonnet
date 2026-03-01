@@ -15,4 +15,7 @@ local externalSecret = externalSecrets.nogroup.v1.externalSecret;
     + (if refreshPolicy != null then externalSecret.spec.withRefreshPolicy(refreshPolicy) else {})
     + (if creationPolicy != null then externalSecret.spec.target.withCreationPolicy(creationPolicy) else {})
     + (if deletionPolicy != null then externalSecret.spec.target.withDeletionPolicy(deletionPolicy) else {}),
+
+  withSecretLabels(labels)::
+    externalSecret.spec.target.template.metadata.withLabels(labels),
 }
