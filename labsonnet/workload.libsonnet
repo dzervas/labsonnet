@@ -125,6 +125,22 @@ local volumeMount = k.core.v1.volumeMount;
         )
       else [];
 
+    local inheritedContainers =
+      if std.objectHas(cfg, 'containers') && std.length(cfg.containers) > 0 then
+        std.map(
+          function(ic)
+            ic {
+              volumeMounts:
+                (if std.objectHas(ctr, 'volumeMounts') then ctr.volumeMounts else [])
+                + (if std.objectHas(ic, 'volumeMounts') then ic.volumeMounts else []),
+              env:
+                (if std.objectHas(ctr, 'env') then ctr.env else [])
+                + (if std.objectHas(ic, 'env') then ic.env else []),
+            },
+          cfg.containers
+        )
+      else [];
+
     local configMapMounts = std.foldl(
       function(prev, mountPath)
         local cm = cfg.configMapMounts[mountPath];
@@ -165,6 +181,9 @@ local volumeMount = k.core.v1.volumeMount;
        else {})
     + (if std.length(inheritedInitContainers) > 0
        then { spec+: { template+: { spec+: { initContainers: inheritedInitContainers } } } }
+       else {})
+    + (if std.length(inheritedContainers) > 0
+       then { spec+: { template+: { spec+: { containers+: inheritedContainers } } } }
        else {})
     + defaultPodSecCtx
     + podSecCtxOverride
