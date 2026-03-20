@@ -120,7 +120,7 @@ local volumeMount = k.core.v1.volumeMount;
               env:
                 (if std.objectHas(ctr, 'env') then ctr.env else [])
                 + (if std.objectHas(ic, 'env') then ic.env else []),
-            },
+            } + defaultSecCtx + secCtxOverride,
           cfg.initContainers
         )
       else [];
@@ -136,7 +136,7 @@ local volumeMount = k.core.v1.volumeMount;
               env:
                 (if std.objectHas(ctr, 'env') then ctr.env else [])
                 + (if std.objectHas(ic, 'env') then ic.env else []),
-            },
+            } + defaultSecCtx + secCtxOverride,
           cfg.containers
         )
       else [];
