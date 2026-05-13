@@ -158,6 +158,7 @@ local volumeMount = k.core.v1.volumeMount;
     // Build default pod security context, then merge user overrides
     local defaultPodSecCtx =
       workload.spec.template.spec.securityContext.withFsGroup(cfg.runAsUser)
+      + workload.spec.template.spec.securityContext.withFsGroupChangePolicy('OnRootMismatch')
       + workload.spec.template.spec.securityContext.withRunAsNonRoot(true);
     local podSecCtxOverride =
       if std.length(std.objectFields(cfg.podSecurityContext)) > 0
