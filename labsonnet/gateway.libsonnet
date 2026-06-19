@@ -28,7 +28,8 @@ local routeTypes = {
 
     if routeKey == 'httpRoute' then
       local matches = if std.objectHas(routeCfg, 'matches') then routeCfg.matches else null;
-      gatewayHelper.httpRoute(resourceName, namespace, serviceName, port, fqdn, gateway, matches, annotations)
+      local filters = if std.objectHas(routeCfg, 'filters') then routeCfg.filters else [];
+      gatewayHelper.httpRoute(resourceName, namespace, serviceName, port, fqdn, gateway, matches, annotations, filters)
     else if routeKey == 'grpcRoute' then
       gatewayHelper.grpcRoute(resourceName, namespace, serviceName, port, fqdn, gateway, annotations)
     else if routeKey == 'tcpRoute' then

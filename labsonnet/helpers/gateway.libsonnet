@@ -30,7 +30,7 @@ local buildRoute(rt, name, namespace, serviceName, port, gateway, hostnames, rul
 
 {
 
-  httpRoute(name, namespace, serviceName, port, fqdn, gateway, matches=null, annotations={})::
+  httpRoute(name, namespace, serviceName, port, fqdn, gateway, matches=null, annotations={}, filters=[])::
     local gw = { sectionName: 'https' } + gateway;
     local rt = {
       route: httpRouteLib,
@@ -49,7 +49,8 @@ local buildRoute(rt, name, namespace, serviceName, port, gateway, hostnames, rul
         rt.backendRef.withName(serviceName)
         + rt.backendRef.withPort(port),
       ])
-      + rt.rule.withMatches(effectiveMatches);
+      + rt.rule.withMatches(effectiveMatches)
+      + rt.rule.withFilters(filters);
     buildRoute(rt, name, namespace, serviceName, port, gw, [fqdn], rule, annotations),
 
 
