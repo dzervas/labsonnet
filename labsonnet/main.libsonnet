@@ -255,6 +255,23 @@ local dedupPorts(ports) =
       std.objectFields(me._pvs)
     )) : "labsonnet '%s': all pvs entries must have a 'size' field (unless 'emptyDir' is true)" % me._name,
 
+    // Affinity (validate the final composed value)
+    local aff = me._affinity,
+    assert aff == null || std.isObject(aff) :
+           "labsonnet '%s': 'affinity' must be null or an object" % me._name,
+    local affinityFields = if std.isObject(aff) then std.objectFields(aff) else [],
+    assert !std.isObject(aff) || std.length(affinityFields) > 0 || std.length(std.objectFieldsAll(aff)) == 0 :
+           "labsonnet '%s': 'affinity' has only hidden fields; pass a concrete affinity object, or null or {} for unrestricted placement" % me._name,
+    local unknownAffinityFields = std.filter(
+      function(field) !std.member(['nodeAffinity', 'podAffinity', 'podAntiAffinity'], field),
+      affinityFields
+    ),
+    assert std.length(unknownAffinityFields) == 0 :
+           "labsonnet '%s': 'affinity' has unknown visible fields: %s (allowed: nodeAffinity, podAffinity, podAntiAffinity)" % [me._name, std.join(', ', unknownAffinityFields)],
+    local invalidAffinityFields = std.filter(function(field) !std.isObject(aff[field]), affinityFields),
+    assert std.length(invalidAffinityFields) == 0 :
+           "labsonnet '%s': 'affinity' fields must contain objects: %s" % [me._name, std.join(', ', invalidAffinityFields)],
+
     // Probes
     assert me._livenessProbe == null || std.isObject(me._livenessProbe) :
            "labsonnet '%s': 'livenessProbe' must be an object" % me._name,
@@ -435,8 +452,8 @@ local dedupPorts(ports) =
   ),
   withRunAsUser(uid):: { _runAsUser:: uid },
   '#withAffinity':: d.fn(
-    help='Set the affinity for the app - for more affinities check helpers/affinity.libsonnet',
-    args=[d.arg('affinity', d.T.object)],
+    help='Set workload affinity with nodeAffinity, podAffinity, or podAntiAffinity object fields (see helpers/affinity.libsonnet)',
+    args=[d.arg('affinity', 'object | null')],
   ),
   withAffinity(aff):: { _affinity:: aff },
   '#withServiceType':: d.fn(

@@ -21,6 +21,7 @@ local labsonnet = import "https://github.com/dzervas/labsonnet/labsonnet/main.li
 * [`fn withArgs(args)`](#fn-withargs)
 * [`fn withCommand(command)`](#fn-withcommand)
 * [`fn withConfigMapMount(mountPath, name, readOnly=true)`](#fn-withconfigmapmount)
+* [`fn withContainer(container)`](#fn-withcontainer)
 * [`fn withCreateNamespace(create=true)`](#fn-withcreatenamespace)
 * [`fn withEmptyDir(mountPath)`](#fn-withemptydir)
 * [`fn withEnv(env)`](#fn-withenv)
@@ -87,9 +88,9 @@ withAffinity(affinity)
 
 PARAMETERS:
 
-* **affinity** (`object`)
+* **affinity** (`object | null`)
 
-Set the affinity for the app - for more affinities check helpers/affinity.libsonnet
+Set workload affinity with nodeAffinity, podAffinity, or podAntiAffinity object fields (see helpers/affinity.libsonnet)
 ### fn withArgs
 
 ```jsonnet
@@ -126,6 +127,17 @@ PARAMETERS:
    - default value: `true`
 
 Add a configMap volume mount to the app
+### fn withContainer
+
+```jsonnet
+withContainer(container)
+```
+
+PARAMETERS:
+
+* **container** (`object`)
+
+Add an init container to the app - pass a standard k.core.v1.container object
 ### fn withCreateNamespace
 
 ```jsonnet
@@ -243,7 +255,7 @@ PARAMETERS:
 
 * **container** (`object`)
 
-Add an init container to the app
+Add an init container to the app - pass a standard k.core.v1.container object
 ### fn withLivenessProbe
 
 ```jsonnet
