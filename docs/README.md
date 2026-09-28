@@ -137,7 +137,7 @@ PARAMETERS:
 
 * **container** (`object`)
 
-Add an init container to the app - pass a standard k.core.v1.container object
+Add an additional container to the app - pass a standard k.core.v1.container object
 ### fn withCreateNamespace
 
 ```jsonnet

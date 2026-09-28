@@ -437,7 +437,7 @@ local dedupPorts(ports) =
   ),
   withArgs(args):: { _args:: args },
   '#withContainer':: d.fn(
-    help='Add an init container to the app - pass a standard k.core.v1.container object',
+    help='Add an additional container to the app - pass a standard k.core.v1.container object',
     args=[d.arg('container', d.T.object)],
   ),
   withContainer(container):: { _containers+:: [container] },
