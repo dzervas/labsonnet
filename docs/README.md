@@ -29,7 +29,8 @@ local labsonnet = import "https://github.com/dzervas/labsonnet/labsonnet/main.li
 * [`fn withExternalSecretMount(name, mountPath, cfg, readOnly=true)`](#fn-withexternalsecretmount)
 * [`fn withFieldRefEnv(envs)`](#fn-withfieldrefenv)
 * [`fn withFqdn(fqdn)`](#fn-withfqdn)
-* [`fn withHeadlessService(headless=true)`](#fn-withheadlessservice)
+* [`fn withHeadlessPort(portEntry)`](#fn-withheadlessport)
+* [`fn withHeadlessService(name, publishNotReadyAddresses=true)`](#fn-withheadlessservice)
 * [`fn withImagePullSecrets(secrets)`](#fn-withimagepullsecrets)
 * [`fn withInitContainer(container)`](#fn-withinitcontainer)
 * [`fn withLivenessProbe(probe)`](#fn-withlivenessprobe)
@@ -222,18 +223,30 @@ PARAMETERS:
 * **fqdn** (`string`)
 
 Set the FQDN for the app
-### fn withHeadlessService
+### fn withHeadlessPort
 
 ```jsonnet
-withHeadlessService(headless=true)
+withHeadlessPort(portEntry)
 ```
 
 PARAMETERS:
 
-* **headless** (`bool`)
+* **portEntry** (`object`)
+
+Add a container port exposed on the headless Service. Use withHeadlessService() to enable headless Service generation.
+### fn withHeadlessService
+
+```jsonnet
+withHeadlessService(name, publishNotReadyAddresses=true)
+```
+
+PARAMETERS:
+
+* **name** (`string`)
+* **publishNotReadyAddresses** (`bool`)
    - default value: `true`
 
-Set whether to create a headless service
+Create a headless Service for a Deployment or StatefulSet, optionally setting its name and publishing not-ready addresses. The name defaults to `<workload>-headless` and supplies StatefulSet serviceName unless overridden.
 ### fn withImagePullSecrets
 
 ```jsonnet
@@ -366,7 +379,7 @@ PARAMETERS:
 
 * **portEntry** (`object`)
 
-Add a port to the app
+Add a container port exposed on the ordinary Service. Routing configs accept `name` to override the resource name while keeping output keys based on port names.
 ### fn withReadinessProbe
 
 ```jsonnet
@@ -460,9 +473,7 @@ PARAMETERS:
 * **interval** (`string`)
 * **name** (`string`)
 
-Add ServiceMonitor for Prometheus/VictoriaMetrics scraping.
-portName must match a port name from withPort(). name defaults to portName.
-
+Add a ServiceMonitor for Prometheus/VictoriaMetrics scraping. portName must match an exposed Service port name after deduplication; name defaults to portName.
 ### fn withServiceName
 
 ```jsonnet
@@ -473,7 +484,7 @@ PARAMETERS:
 
 * **name** (`string`)
 
-Set the name for the new kubernetes service
+Override the StatefulSet serviceName, taking precedence over the headless Service name.
 ### fn withServiceType
 
 ```jsonnet
