@@ -21,6 +21,12 @@ local routingKeys = std.objectFields(routingMeta);
 
 local portRoutingKeys(port) = std.filter(function(rk) std.objectHas(port, rk), routingKeys);
 
+local addPort(portEntry, headless) =
+  assert std.isObject(portEntry) : 'each port entry must be an object';
+  assert !std.objectHas(portEntry, 'service') && !std.objectHas(portEntry, 'headlessService') :
+         'use withPort() or withHeadlessPort() to choose Service exposure';
+  { _ports+:: [portEntry { service: !headless, headlessService: headless }] };
+
 local processPort(port) =
   local rkeys = portRoutingKeys(port);
   local routingKey = if std.length(rkeys) > 0 then rkeys[0] else null;
@@ -36,24 +42,31 @@ local processPort(port) =
     if routingCfg != null && std.objectHas(routingCfg, 'fqdn') then routingCfg.fqdn
     else null;
   {
-    normalized: { port: port.port, protocol: protocol, name: portName },
+    normalized: {
+      port: port.port,
+      protocol: protocol,
+      name: portName,
+      service: port.service,
+      headlessService: port.headlessService,
+    },
     routingKey: routingKey,
     routingCfg: routingCfg,
     portName: portName,
     fqdn: routeFqdn,
   };
 
-local dedupPorts(ports) =
-  // Create scalar key to easily identify duplicates based on port+protocol
-  local portKey(p) = '%d/%s' % [p.port, p.protocol];
+local dedupBy(entries, keyFor) =
   std.foldl(
     function(acc, p)
-      local key = portKey(p);
+      local key = keyFor(p);
       if std.member(acc.seen, key) then acc
       else { seen: acc.seen + [key], result: acc.result + [p] },
-    ports,
+    entries,
     { seen: [], result: [] }
   ).result;
+
+local dedupPorts(ports) = dedupBy(ports, function(p) '%d/%s' % [p.port, p.protocol]);
+local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
 
 {
   '#':: d.pkg(
@@ -99,6 +112,7 @@ local dedupPorts(ports) =
     _runAsUser:: 1000,
     _serviceType:: 'ClusterIP',
     _headlessService:: false,
+    _headlessServiceName:: null,
     _headlessPublishNotReady:: true,
     _serviceName:: null,
     _podManagementPolicy:: null,
@@ -159,10 +173,31 @@ local dedupPorts(ports) =
     local portNames = std.map(function(p) p.name, normalizedPorts),
 
     local uniquePorts = dedupPorts(normalizedPorts),
-    local routedPorts = std.filter(function(pp) pp.routingKey != null, processedPorts),
+    // Each Service deduplicates its own declarations independently.
+    local servicePorts = dedupPorts(std.filter(function(p) p.service, normalizedPorts)),
+    local headlessServicePorts = dedupPorts(std.filter(function(p) p.headlessService, normalizedPorts)),
+    local routeEntries = std.filter(function(pp) pp.routingKey != null, processedPorts),
+    local routedPorts = dedupRoutes(routeEntries),
 
-    assert std.length(portNames) == std.length(std.set(portNames)) :
-           "labsonnet '%s': duplicate port name in ports" % me._name,
+    assert std.all([
+      p.name != q.name || (p.port == q.port && p.protocol == q.protocol)
+      for p in normalizedPorts
+      for q in normalizedPorts
+    ]) : "labsonnet '%s': duplicate port name must reference the same port/protocol pair" % me._name,
+    assert std.all([
+      p.portName != q.portName || (p.routingKey == q.routingKey && p.routingCfg == q.routingCfg)
+      for p in routeEntries
+      for q in routeEntries
+    ]) : "labsonnet '%s': conflicting routing configurations for the same port name" % me._name,
+
+    assert std.all(std.map(
+      function(pp) std.length(std.filter(
+        function(p) p.port == pp.normalized.port && p.protocol == pp.normalized.protocol,
+        servicePorts
+      )) > 0,
+      routedPorts
+    )) : "labsonnet '%s': each route must reference a port exposed by the ordinary Service" % me._name,
+
     assert std.all(std.map(
       function(pp)
         if pp.routingKey != null && std.member(gatewayLib.routeKeys, pp.routingKey) then
@@ -183,8 +218,6 @@ local dedupPorts(ports) =
     // Workload Type
     assert me._type == 'Deployment' || me._type == 'StatefulSet' :
            "labsonnet '%s': unsupported type '%s' (must be 'Deployment' or 'StatefulSet')" % [me._name, me._type],
-    assert !me._headlessService || me._type == 'StatefulSet' :
-           "labsonnet '%s': 'headlessService' is only supported for StatefulSet workloads" % me._name,
     assert me._podManagementPolicy == null
            || (me._type == 'StatefulSet' && (me._podManagementPolicy == 'OrderedReady' || me._podManagementPolicy == 'Parallel')) :
            "labsonnet '%s': 'podManagementPolicy' must be 'OrderedReady' or 'Parallel' and requires StatefulSet type" % me._name,
@@ -292,10 +325,14 @@ local dedupPorts(ports) =
     assert me._resources == null || std.isObject(me._resources) :
            "labsonnet '%s': 'resources' must be an object with 'requests' and/or 'limits'" % me._name,
 
-    // Auto-derive serviceName from headless service when not explicitly set.
-    local effectiveServiceName =
+    local effectiveHeadlessServiceName =
+      if me._headlessServiceName != null then me._headlessServiceName
+      else me._name + '-headless',
+
+    // Auto-derive StatefulSet serviceName from the generated headless Service.
+    local effectiveStatefulSetServiceName =
       if me._serviceName != null then me._serviceName
-      else if me._headlessService then me._name + '-headless'
+      else if me._headlessService then effectiveHeadlessServiceName
       else null,
 
     local cfg = {
@@ -311,10 +348,12 @@ local dedupPorts(ports) =
       runAsUser: me._runAsUser,
       serviceType: me._serviceType,
       headlessPublishNotReady: me._headlessPublishNotReady,
-      serviceName: effectiveServiceName,
+      serviceName: effectiveStatefulSetServiceName,
       podManagementPolicy: me._podManagementPolicy,
       fieldRefEnvs: me._fieldRefEnvs,
       ports: uniquePorts,
+      servicePorts: servicePorts,
+      headlessServicePorts: headlessServicePorts,
       pvs: me._pvs,
       configMapMounts: me._configMapMounts,
       secrets: me._secrets,
@@ -344,20 +383,23 @@ local dedupPorts(ports) =
       else {},
 
     workload: workloadLib.new(me._name, me._image, cfg),
-    service: serviceLib.new(me._name, cfg),
-    headlessService: if me._headlessService then serviceLib.newHeadless(me._name, cfg) else {},
+    service: if std.length(servicePorts) > 0 then serviceLib.new(me._name, cfg) else {},
+    headlessService: if me._headlessService then serviceLib.newHeadless(effectiveHeadlessServiceName, cfg) else {},
 
     routing: {
       [entry.portName]:
         // Resolve fqdn: per-route takes precedence over service-level default.
         local effectiveFqdn = if entry.fqdn != null then entry.fqdn else me._fqdn;
+        local resourceName =
+          if std.objectHas(entry.routingCfg, 'name') then entry.routingCfg.name
+          else '%s-%s' % [me._name, entry.portName];
         if std.member(gatewayLib.routeKeys, entry.routingKey) then
           local rawGw = if std.objectHas(entry.routingCfg, 'gateway') then entry.routingCfg.gateway else {};
           local gwDefaults = if routingMeta[entry.routingKey].layer == 'L7' then { sectionName: 'https' } else {};
           local merged = { gateway: gwDefaults + rawGw } + entry.routingCfg;
           gatewayLib.build(
             entry.routingKey,
-            '%s-%s' % [me._name, entry.portName],
+            resourceName,
             me._name,
             me._namespace,
             effectiveFqdn,
@@ -366,7 +408,7 @@ local dedupPorts(ports) =
           )
         else
           ingressLib.new(
-            '%s-%s' % [me._name, entry.portName],
+            resourceName,
             me._name,
             me._namespace,
             effectiveFqdn,
@@ -472,15 +514,19 @@ local dedupPorts(ports) =
   ),
   withNamespace(ns):: { _namespace:: ns },
   '#withHeadlessService':: d.fn(
-    help='Set whether to create a headless service',
-    args=[d.arg('headless', d.T.boolean, true)],
+    help='Create a headless Service for a Deployment or StatefulSet, optionally setting its name and publishing not-ready addresses. The name defaults to `<workload>-headless` and supplies StatefulSet serviceName unless overridden.',
+    args=[
+      d.arg('name', d.T.string, null),
+      d.arg('publishNotReadyAddresses', d.T.boolean, true),
+    ],
   ),
-  withHeadlessService(publishNotReadyAddresses=true):: {
+  withHeadlessService(name=null, publishNotReadyAddresses=true):: {
     _headlessService:: true,
-    _headlessPublishNotReady:: publishNotReadyAddresses,
+    _headlessServiceName:: if std.isBoolean(name) then null else name,
+    _headlessPublishNotReady:: if std.isBoolean(name) then name else publishNotReadyAddresses,
   },
   '#withServiceName':: d.fn(
-    help='Set the name for the new kubernetes service',
+    help='Override the StatefulSet serviceName, taking precedence over the headless Service name.',
     args=[d.arg('name', d.T.string)],
   ),
   withServiceName(name):: { _serviceName:: name },
@@ -528,10 +574,15 @@ local dedupPorts(ports) =
   // --- Merge/append accumulators ---
 
   '#withPort':: d.fn(
-    help='Add a port to the app',
+    help='Add a container port exposed on the ordinary Service. Routing configs accept `name` to override the resource name while keeping output keys based on port names.',
     args=[d.arg('portEntry', d.T.object)],
   ),
-  withPort(portEntry):: { _ports+:: [portEntry] },
+  withPort(portEntry):: addPort(portEntry, false),
+  '#withHeadlessPort':: d.fn(
+    help='Add a container port exposed on the headless Service. Use withHeadlessService() to enable headless Service generation.',
+    args=[d.arg('portEntry', d.T.object)],
+  ),
+  withHeadlessPort(portEntry):: addPort(portEntry, true),
   '#withPV':: d.fn(
     help='Add a persistent volume mount to the app',
     args=[
@@ -633,10 +684,7 @@ local dedupPorts(ports) =
   withPodAnnotations(annotations):: { _podAnnotations+:: annotations },
 
   '#withServiceMonitor':: d.fn(
-    help=|||
-      Add ServiceMonitor for Prometheus/VictoriaMetrics scraping.
-      portName must match a port name from withPort(). name defaults to portName.
-    |||,
+    help='Add a ServiceMonitor for Prometheus/VictoriaMetrics scraping. portName must match an exposed Service port name after deduplication; name defaults to portName.',
     args=[
       d.arg('portName', d.T.string),
       d.arg('path', d.T.string),
