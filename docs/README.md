@@ -19,12 +19,14 @@ local labsonnet = import "https://github.com/dzervas/labsonnet/labsonnet/main.li
 * [`fn new(name, image)`](#fn-new)
 * [`fn withAffinity(affinity)`](#fn-withaffinity)
 * [`fn withArgs(args)`](#fn-withargs)
+* [`fn withClaimTemplate(name, config)`](#fn-withclaimtemplate)
 * [`fn withCommand(command)`](#fn-withcommand)
 * [`fn withConfigMapMount(mountPath, name, readOnly=true)`](#fn-withconfigmapmount)
 * [`fn withContainer(container)`](#fn-withcontainer)
 * [`fn withCreateNamespace(create=true)`](#fn-withcreatenamespace)
 * [`fn withEmptyDir(mountPath)`](#fn-withemptydir)
 * [`fn withEnv(env)`](#fn-withenv)
+* [`fn withExistingPVC(volumeName, claimName)`](#fn-withexistingpvc)
 * [`fn withExternalSecretEnvs(name, envs, cfg)`](#fn-withexternalsecretenvs)
 * [`fn withExternalSecretMount(name, mountPath, cfg, readOnly=true)`](#fn-withexternalsecretmount)
 * [`fn withFieldRefEnv(envs)`](#fn-withfieldrefenv)
@@ -55,6 +57,7 @@ local labsonnet = import "https://github.com/dzervas/labsonnet/labsonnet/main.li
 * [`fn withServiceType(type)`](#fn-withservicetype)
 * [`fn withStartupProbe(probe)`](#fn-withstartupprobe)
 * [`fn withType(type)`](#fn-withtype)
+* [`fn withVolumeMount(mountPath, volumeName, readOnly=false, subPath)`](#fn-withvolumemount)
 
 ## Fields
 
@@ -103,6 +106,28 @@ PARAMETERS:
 * **args** (`array`)
 
 Set the arguments for the app
+### fn withClaimTemplate
+
+```jsonnet
+withClaimTemplate(name, config)
+```
+
+PARAMETERS:
+
+* **name** (`string`)
+* **config** (`object`)
+
+Declare managed StatefulSet storage without mounting it. config accepts size (required), accessModes (default ['ReadWriteOnce']), and storageClassName (default null). The name is the claim-template and volume name and must be a Kubernetes volume name. Repeated equal definitions deduplicate; conflicting definitions fail. Mount it with withVolumeMount. Declarations and references resolve against the final composed configuration, so their order does not matter.
+
+```jsonnet
+labsonnet.new('probe', 'example:1')
++ labsonnet.withType('StatefulSet')
++ labsonnet.withPort({ port: 8080 })
++ labsonnet.withClaimTemplate('state', { size: '2Gi', storageClassName: 'fast' })
++ labsonnet.withVolumeMount('/config', 'state', subPath='config')
++ labsonnet.withVolumeMount('/data', 'state', subPath='data')
+```
+
 ### fn withCommand
 
 ```jsonnet
@@ -127,7 +152,7 @@ PARAMETERS:
 * **readOnly** (`bool`)
    - default value: `true`
 
-Add a configMap volume mount to the app
+Add a configMap volume mount to the app. Duplicate mount paths across all mount APIs fail, including identical repeats.
 ### fn withContainer
 
 ```jsonnet
@@ -161,7 +186,7 @@ PARAMETERS:
 
 * **mountPath** (`string`)
 
-Add an emptyDir volume mount to the app
+Add an emptyDir volume mount to the app. Duplicate mount paths across all mount APIs fail, including identical repeats.
 ### fn withEnv
 
 ```jsonnet
@@ -173,6 +198,27 @@ PARAMETERS:
 * **env** (`object`)
 
 Add environment variables to the app
+### fn withExistingPVC
+
+```jsonnet
+withExistingPVC(volumeName, claimName)
+```
+
+PARAMETERS:
+
+* **volumeName** (`string`)
+* **claimName** (`string`)
+
+Declare a volume referencing an existing PVC in the workload namespace, without creating or managing that claim. Works with Deployment and StatefulSet. volumeName must be a Kubernetes volume name; claimName is independent and may be a longer or dotted PVC name. Repeated equal definitions deduplicate; conflicting definitions fail. This API does not add a mount.
+
+```jsonnet
+labsonnet.new('reader', 'example:1')
++ labsonnet.withPort({ port: 8080 })
++ labsonnet.withExistingPVC('media', 'shared-media')
++ labsonnet.withVolumeMount('/movies', 'media', readOnly=true, subPath='movies')
++ labsonnet.withVolumeMount('/series', 'media', readOnly=true, subPath='series')
+```
+
 ### fn withExternalSecretEnvs
 
 ```jsonnet
@@ -200,7 +246,7 @@ PARAMETERS:
 * **readOnly** (`bool`)
    - default value: `true`
 
-Add an external secret mounted as a volume. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }
+Add an external secret mounted as a volume. Duplicate mount paths across all mount APIs fail, including identical repeats. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }
 ### fn withFieldRefEnv
 
 ```jsonnet
@@ -324,7 +370,8 @@ PARAMETERS:
 * **mountPath** (`string`)
 * **pvConfig** (`object`)
 
-Add a persistent volume mount to the app
+Convenience wrapper over storage declaration and withVolumeMount, declaring managed storage and mounting it in one call. pvConfig supports name, size, accessModes, storageClassName, readOnly (default false), subPath (default null), and emptyDir. Persistent storage requires StatefulSet. Names default to `<workload>-<mount-path-with-dashes>`; storage defaults are ReadWriteOnce and no explicit storage class. Each mount path may be declared only once across all mount APIs, including identical repeats. Use withVolumeMount at another path to mount its named volume again.
+
 ### fn withPodAnnotations
 
 ```jsonnet
@@ -448,7 +495,7 @@ PARAMETERS:
 * **readOnly** (`bool`)
    - default value: `true`
 
-Add a secret volume mount to the app
+Add a secret volume mount to the app. Duplicate mount paths across all mount APIs fail, including identical repeats.
 ### fn withSecurityContext
 
 ```jsonnet
@@ -518,3 +565,18 @@ PARAMETERS:
 * **type** (`string`)
 
 Set the workload type of the app (Deployment or StatefulSet)
+### fn withVolumeMount
+
+```jsonnet
+withVolumeMount(mountPath, volumeName, readOnly=false, subPath)
+```
+
+PARAMETERS:
+
+* **mountPath** (`string`)
+* **volumeName** (`string`)
+* **readOnly** (`bool`)
+   - default value: `false`
+* **subPath** (`string`)
+
+Mount a declared volume or claim template. References resolve after composition, so declarations can appear before or after mounts. Also accepts volume names supplied by withPV, withEmptyDir, withSecretMount, withConfigMapMount, or withExternalSecretMount. Each mount has independent readOnly and subPath; null subPath omits the field. Different paths accumulate. Each mount path may be declared only once across all mount APIs, including identical repeats. Unknown references and conflicting volume definitions fail.
