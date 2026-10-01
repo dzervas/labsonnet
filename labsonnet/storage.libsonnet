@@ -37,7 +37,7 @@ local dedupDefinitions(entries) = std.foldl(
     // Maps retain final values; the call journal preserves duplicate paths that
     // composition would otherwise overwrite. Check final maps for direct overrides too.
     local actualPaths = std.objectFields(cfg.secrets)
-                      + std.objectFields(cfg.configMapMounts) + [s.mountPath for s in std.objectValues(cfg.externalSecretMounts)]
+                      + std.objectFields(cfg.configMapMounts) + std.objectFields(cfg.externalSecretMounts)
                       + std.objectFields(cfg.volumeMounts);
     local duplicatePaths = [
       path for path in std.set(cfg.mountPaths + actualPaths)
@@ -53,8 +53,8 @@ local dedupDefinitions(entries) = std.foldl(
       + [{ name: v.name, kind: 'volume', volume: v } for v in cfg.volumes]
       + [{ name: s.name, kind: 'volume', volume: volume.fromSecret(s.name, s.name) }
          for s in std.objectValues(cfg.secrets)]
-      + [{ name: secretName, kind: 'volume', volume: volume.fromSecret(secretName, secretName) }
-         for secretName in std.objectFields(cfg.externalSecretMounts)]
+      + [{ name: s.name, kind: 'volume', volume: volume.fromSecret(s.name, s.name) }
+         for s in std.objectValues(cfg.externalSecretMounts)]
       + [local c = cfg.configMapMounts[path];
          local readOnly = if std.objectHas(c, 'readOnly') then c.readOnly else true;
          { name: c.name, kind: 'volume', volume: volume.fromConfigMap(c.name, c.name)

@@ -246,7 +246,7 @@ PARAMETERS:
 * **readOnly** (`bool`)
    - default value: `true`
 
-Add an external secret mounted as a volume. Duplicate mount paths across all mount APIs fail, including identical repeats. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }
+Add an external secret mounted as a volume. Duplicate mount paths across all mount APIs fail, including identical repeats; the same secret may be mounted at different paths. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }
 ### fn withFieldRefEnv
 
 ```jsonnet

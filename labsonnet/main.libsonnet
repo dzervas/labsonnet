@@ -240,7 +240,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
 
     // ExternalSecrets
     local esNames = std.objectFields(me._externalSecrets),
-    local esMountNames = std.objectFields(me._externalSecretMounts),
+    local esMountNames = [m.name for m in std.objectValues(me._externalSecretMounts)],
     local secretEnvs = std.flatMap(
       function(secretName)
         local es = me._externalSecrets[secretName];
@@ -712,7 +712,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withExternalSecretEnvs(name, envs, cfg):: { _externalSecrets+:: { [name]+: cfg { envs: envs } } },
   '#withExternalSecretMount':: d.fn(
-    help='Add an external secret mounted as a volume. Duplicate mount paths across all mount APIs fail, including identical repeats. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }',
+    help='Add an external secret mounted as a volume. Duplicate mount paths across all mount APIs fail, including identical repeats; the same secret may be mounted at different paths. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }',
     args=[
       d.arg('name', d.T.string),
       d.arg('mountPath', d.T.string),
@@ -722,7 +722,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withExternalSecretMount(name, mountPath, cfg, readOnly=true):: {
     _externalSecrets+:: { [name]+: cfg },
-    _externalSecretMounts+:: { [name]: { mountPath: mountPath, readOnly: readOnly } },
+    _externalSecretMounts+:: { [mountPath]: { name: name, mountPath: mountPath, readOnly: readOnly } },
     _mountPaths+:: [mountPath],
   },
   '#withImagePullSecrets':: d.fn(

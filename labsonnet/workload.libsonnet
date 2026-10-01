@@ -21,12 +21,12 @@ local volumeMount = k.core.v1.volumeMount;
       std.objectFields(cfg.secrets)
     );
 
-    // External secrets mounted as volumes.
+    // External secrets mounted as volumes, keyed by mount path.
     local extSecretVolumeMounts = std.map(
-      function(secretName)
-        local esm = cfg.externalSecretMounts[secretName];
+      function(mountPath)
+        local esm = cfg.externalSecretMounts[mountPath];
         local readOnly = if std.objectHas(esm, 'readOnly') then esm.readOnly else true;
-        volumeMount.new(secretName, esm.mountPath, readOnly),
+        volumeMount.new(esm.name, mountPath, readOnly),
       std.objectFields(cfg.externalSecretMounts)
     );
 
