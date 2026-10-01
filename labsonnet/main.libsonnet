@@ -223,8 +223,8 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
            "labsonnet '%s': 'podManagementPolicy' must be 'OrderedReady' or 'Parallel' and requires StatefulSet type" % me._name,
     assert !hasRealPvs || me._type == 'StatefulSet' :
            "labsonnet '%s': 'type' must be 'StatefulSet' when pvs with persistent storage are defined" % me._name,
-    assert std.isNumber(me._replicas) && me._replicas > 0 :
-           "labsonnet '%s': 'replicas' must be a positive integer" % me._name,
+    assert std.isNumber(me._replicas) && me._replicas >= 0 && std.floor(me._replicas) == me._replicas :
+           "labsonnet '%s': 'replicas' must be a non-negative integer" % me._name,
     assert std.isNumber(me._runAsUser) :
            "labsonnet '%s': 'runAsUser' must be a number" % me._name,
 
@@ -464,7 +464,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withType(type):: { _type:: type },
   '#withReplicas':: d.fn(
-    help='Set the number of replicas for the app',
+    help='Set the number of replicas for the app (a non-negative integer)',
     args=[d.arg('replicas', d.T.number)],
   ),
   withReplicas(n):: { _replicas:: n },
