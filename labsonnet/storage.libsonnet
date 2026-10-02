@@ -47,9 +47,15 @@ local dedupDefinitions(entries) = std.foldl(
     assert std.length(duplicatePaths) == 0 :
       'labsonnet: duplicate volume mount paths: %s' % std.join(', ', duplicatePaths);
 
+    // withPV formerly traversed a mount-path map in alphabetical order.
+    // Preserve that order even when callers supply unrelated template names.
+    local orderedClaimTemplates = std.sort(
+      cfg.claimTemplates,
+      function(c) if std.objectHas(c, 'mountPath') then c.mountPath else c.name
+    );
     local definitions = dedupDefinitions(
       [{ name: c.name, kind: 'claimTemplate', claim: pvc.new(c.name, cfg.namespace, c.config, cfg.labels) }
-       for c in cfg.claimTemplates]
+       for c in orderedClaimTemplates]
       + [{ name: v.name, kind: 'volume', volume: v } for v in cfg.volumes]
       + [{ name: s.name, kind: 'volume', volume: volume.fromSecret(s.name, s.name) }
          for s in std.objectValues(cfg.secrets)]

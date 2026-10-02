@@ -608,14 +608,16 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
         readOnly=if std.objectHas(pvConfig, 'readOnly') then pvConfig.readOnly else false,
         subPath=if std.objectHas(pvConfig, 'subPath') then pvConfig.subPath else null
       ),
-      _claimTemplates+:: if emptyDir then [] else declaration._claimTemplates,
+      _claimTemplates+:: if emptyDir then [] else [
+        entry { mountPath: mountPath } for entry in declaration._claimTemplates
+      ],
       _volumes+:: if emptyDir then declaration._volumes else [],
       _volumeMounts+:: mount._volumeMounts,
       _mountPaths+:: mount._mountPaths,
     },
   '#withClaimTemplate':: d.fn(
     help=|||
-      Declare managed StatefulSet storage without mounting it. config accepts size (required), accessModes (default ['ReadWriteOnce']), and storageClassName (default null). The name is the claim-template and volume name and must be a Kubernetes volume name. Repeated equal definitions deduplicate; conflicting definitions fail. Mount it with withVolumeMount. Declarations and references resolve against the final composed configuration, so their order does not matter.
+      Declare managed StatefulSet storage without mounting it. config accepts size (required), accessModes (default ['ReadWriteOnce']), and storageClassName (default null). The name is the claim-template and volume name and must be a Kubernetes volume name. Repeated equal definitions deduplicate; conflicting definitions fail. Templates declared here render in alphabetical name order; withPV templates retain alphabetical mount-path order. Mount it with withVolumeMount. Declarations and references resolve against the final composed configuration, so their order does not matter.
 
       ```jsonnet
       labsonnet.new('probe', 'example:1')
