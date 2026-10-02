@@ -401,7 +401,7 @@ PARAMETERS:
 
 * **replicas** (`number`)
 
-Set the number of replicas for the app
+Set the number of replicas for the app (a non-negative integer)
 ### fn withResources
 
 ```jsonnet
