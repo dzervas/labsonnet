@@ -2,7 +2,6 @@
 
 local affinity = import './helpers/affinity.libsonnet';
 local k = import 'k.libsonnet';
-local pvcLib = import 'pvc.libsonnet';
 
 local container = k.core.v1.container;
 local envVar = k.core.v1.envVar;
@@ -15,29 +14,6 @@ local volumeMount = k.core.v1.volumeMount;
     local workload = if cfg.type == 'Deployment' then k.apps.v1.deployment else k.apps.v1.statefulSet;
     local imagePullPolicy = if std.endsWith(image, ':latest') || std.length(std.findSubstr(':', image)) == 0 then 'Always' else 'IfNotPresent';
 
-    local pvVolumes = std.map(
-      function(mountPath)
-        local volName = pvcLib.volumeName(name, mountPath, cfg.pvs[mountPath]);
-        if std.objectHas(cfg.pvs[mountPath], 'emptyDir') && cfg.pvs[mountPath].emptyDir then
-          volume.fromEmptyDir(volName)
-        else
-          volume.fromPersistentVolumeClaim(volName, volName),
-      std.objectFields(cfg.pvs)
-    );
-
-    local pvVolumeMounts = std.map(
-      function(mountPath)
-        local volName = pvcLib.volumeName(name, mountPath, cfg.pvs[mountPath]);
-        local readOnly = std.objectHas(cfg.pvs[mountPath], 'readOnly') && cfg.pvs[mountPath].readOnly;
-        volumeMount.new(volName, mountPath, readOnly),
-      std.objectFields(cfg.pvs)
-    );
-
-    local secretVolumes = std.map(
-      function(mountPath) volume.fromSecret(cfg.secrets[mountPath].name, cfg.secrets[mountPath].name),
-      std.objectFields(cfg.secrets)
-    );
-
     local secretVolumeMounts = std.map(
       function(mountPath)
         local s = cfg.secrets[mountPath];
@@ -45,24 +21,14 @@ local volumeMount = k.core.v1.volumeMount;
       std.objectFields(cfg.secrets)
     );
 
-    // External secrets mounted as volumes
-    local extSecretNames = std.objectFields(cfg.externalSecretMounts);
-    local extSecretVolumes = std.map(
-      function(secretName)
-        volume.fromSecret(secretName, secretName),
-      extSecretNames
-    );
+    // External secrets mounted as volumes, keyed by mount path.
     local extSecretVolumeMounts = std.map(
-      function(secretName)
-        local esm = cfg.externalSecretMounts[secretName];
+      function(mountPath)
+        local esm = cfg.externalSecretMounts[mountPath];
         local readOnly = if std.objectHas(esm, 'readOnly') then esm.readOnly else true;
-        volumeMount.new(secretName, esm.mountPath, readOnly),
-      extSecretNames
+        volumeMount.new(esm.name, mountPath, readOnly),
+      std.objectFields(cfg.externalSecretMounts)
     );
-
-    local allVolumes = pvVolumes + secretVolumes + extSecretVolumes;
-    local podVolumes = if cfg.type == 'Deployment' then allVolumes
-    else std.filter(function(v) !std.objectHas(v, 'persistentVolumeClaim'), allVolumes);
 
     local secretEnvVars = std.map(
       function(entry)
@@ -97,7 +63,7 @@ local volumeMount = k.core.v1.volumeMount;
         function(p) port.new(p.port) + port.withProtocol(p.protocol) + port.withName(p.name),
         cfg.ports
       ))
-      + container.withVolumeMounts(pvVolumeMounts + secretVolumeMounts + extSecretVolumeMounts)
+      + container.withVolumeMounts(cfg.storage.mounts + secretVolumeMounts + extSecretVolumeMounts)
       + container.withEnv(secretEnvVars + fieldRefEnvVars)
       + container.withEnvMap(cfg.env)
       + (if cfg.command != null then container.withCommand(cfg.command) else {})
@@ -174,13 +140,15 @@ local volumeMount = k.core.v1.volumeMount;
       else {};
 
     workload.new(name=name, replicas=cfg.replicas, containers=[ctr])
-    + workload.spec.template.spec.withVolumes(podVolumes)
+    + workload.spec.template.spec.withVolumes(cfg.storage.volumes)
     + (if cfg.type == 'StatefulSet' then
-         workload.spec.withVolumeClaimTemplates(pvcLib.build(name, cfg.namespace, cfg.pvs, cfg.labels))
+         workload.spec.withVolumeClaimTemplates(cfg.storage.claims)
          + (if cfg.serviceName != null then workload.spec.withServiceName(cfg.serviceName) else {})
          + (if cfg.podManagementPolicy != null then workload.spec.withPodManagementPolicy(cfg.podManagementPolicy) else {})
        else {})
     + configMapMounts
+    // ConfigMap mixins add their mounts; use the centrally resolved volumes.
+    + { spec+: { template+: { spec+: { volumes: cfg.storage.volumes } } } }
     + (if cfg.affinity != null then affinity.withWorkloadAffinity(cfg.affinity) else {})
     + workload.metadata.withNamespace(cfg.namespace)
     + (if std.length(cfg.imagePullSecrets) > 0

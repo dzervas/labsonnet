@@ -5,6 +5,7 @@ local d = import 'github.com/jsonnet-libs/docsonnet/doc-util/main.libsonnet';
 local k = import 'k.libsonnet';
 local nsLib = k.core.v1.namespace;
 
+local storageLib = import 'storage.libsonnet';
 local pvcLib = import 'pvc.libsonnet';
 local workloadLib = import 'workload.libsonnet';
 local serviceLib = import 'service.libsonnet';
@@ -17,6 +18,8 @@ local serviceMonitorHelper = import 'helpers/servicemonitor.libsonnet';
 // Used for protocol inference, layer classification, and validation.
 local routingMeta = gatewayLib.meta + ingressLib.meta;
 local routingKeys = std.objectFields(routingMeta);
+
+local declareVolume(v) = { _volumes+:: [v] };
 
 
 local portRoutingKeys(port) = std.filter(function(rk) std.objectHas(port, rk), routingKeys);
@@ -119,7 +122,10 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
     _fieldRefEnvs:: {},
     _secretEnvs:: {},
     _ports:: [],
-    _pvs:: {},
+    _claimTemplates:: [],
+    _volumes:: [],
+    _volumeMounts:: {},
+    _mountPaths:: [],
     _configMapMounts:: {},
     _secrets:: {},
     _env:: {},
@@ -221,8 +227,6 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
     assert me._podManagementPolicy == null
            || (me._type == 'StatefulSet' && (me._podManagementPolicy == 'OrderedReady' || me._podManagementPolicy == 'Parallel')) :
            "labsonnet '%s': 'podManagementPolicy' must be 'OrderedReady' or 'Parallel' and requires StatefulSet type" % me._name,
-    assert !hasRealPvs || me._type == 'StatefulSet' :
-           "labsonnet '%s': 'type' must be 'StatefulSet' when pvs with persistent storage are defined" % me._name,
     assert std.isNumber(me._replicas) && me._replicas >= 0 && std.floor(me._replicas) == me._replicas :
            "labsonnet '%s': 'replicas' must be a non-negative integer" % me._name,
     assert std.isNumber(me._runAsUser) :
@@ -236,7 +240,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
 
     // ExternalSecrets
     local esNames = std.objectFields(me._externalSecrets),
-    local esMountNames = std.objectFields(me._externalSecretMounts),
+    local esMountNames = [m.name for m in std.objectValues(me._externalSecretMounts)],
     local secretEnvs = std.flatMap(
       function(secretName)
         local es = me._externalSecrets[secretName];
@@ -275,18 +279,6 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
       function(mountPath) std.isObject(me._configMapMounts[mountPath]) && std.objectHas(me._configMapMounts[mountPath], 'name'),
       std.objectFields(me._configMapMounts)
     )) : "labsonnet '%s': each configMapMounts entry must be an object with a 'name' field" % me._name,
-
-    // Persistent Volumes
-    local hasRealPvs = std.length(std.filter(
-      function(mountPath) !(std.objectHas(me._pvs[mountPath], 'emptyDir') && me._pvs[mountPath].emptyDir),
-      std.objectFields(me._pvs)
-    )) > 0,
-    assert std.all(std.map(
-      function(mountPath)
-        local pv = me._pvs[mountPath];
-        (std.objectHas(pv, 'emptyDir') && pv.emptyDir) || std.objectHas(pv, 'size'),
-      std.objectFields(me._pvs)
-    )) : "labsonnet '%s': all pvs entries must have a 'size' field (unless 'emptyDir' is true)" % me._name,
 
     // Affinity (validate the final composed value)
     local aff = me._affinity,
@@ -354,7 +346,10 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
       ports: uniquePorts,
       servicePorts: servicePorts,
       headlessServicePorts: headlessServicePorts,
-      pvs: me._pvs,
+      claimTemplates: me._claimTemplates,
+      volumes: me._volumes,
+      volumeMounts: me._volumeMounts,
+      mountPaths: me._mountPaths,
       configMapMounts: me._configMapMounts,
       secrets: me._secrets,
       env: me._env,
@@ -373,6 +368,8 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
       podAnnotations: me._podAnnotations,
     },
 
+    local storage = storageLib.resolve(cfg),
+
     namespace:
       if me._createNamespace then
         nsLib.new(me._namespace)
@@ -382,7 +379,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
            else {})
       else {},
 
-    workload: workloadLib.new(me._name, me._image, cfg),
+    workload: workloadLib.new(me._name, me._image, cfg { storage: storage }),
     service: if std.length(servicePorts) > 0 then serviceLib.new(me._name, cfg) else {},
     headlessService: if me._headlessService then serviceLib.newHeadless(effectiveHeadlessServiceName, cfg) else {},
 
@@ -418,7 +415,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
       for entry in routedPorts
     },
 
-    pvc: if me._type == 'Deployment' then pvcLib.build(me._name, me._namespace, me._pvs, me._labels) else null,
+    pvc: if me._type == 'Deployment' then storage.claims else null,
 
     externalSecrets: {
       [secretName]:
@@ -584,20 +581,92 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withHeadlessPort(portEntry):: addPort(portEntry, true),
   '#withPV':: d.fn(
-    help='Add a persistent volume mount to the app',
+    help=|||
+      Convenience wrapper over storage declaration and withVolumeMount, declaring managed storage and mounting it in one call. pvConfig supports name, size, accessModes, storageClassName, readOnly (default false), subPath (default null), and emptyDir. Persistent storage requires StatefulSet. Names default to `<workload>-<mount-path-with-dashes>`; storage defaults are ReadWriteOnce and no explicit storage class. Each mount path may be declared only once across all mount APIs, including identical repeats. Use withVolumeMount at another path to mount its named volume again.
+    |||,
     args=[
       d.arg('mountPath', d.T.string),
       d.arg('pvConfig', d.T.object),
     ],
   ),
-  withPV(mountPath, pvConfig):: { _pvs+:: { [mountPath]: pvConfig } },
+  withPV(mountPath, pvConfig)::
+    assert std.isObject(pvConfig) : 'labsonnet: pvConfig must be an object';
+    local emptyDir = std.objectHas(pvConfig, 'emptyDir') && pvConfig.emptyDir;
+    local config = {
+      [field]: pvConfig[field]
+      for field in ['size', 'accessModes', 'storageClassName']
+      if std.objectHas(pvConfig, field)
+    };
+    {
+      // Resolve convenience names against the final workload name, as before.
+      local volumeName = pvcLib.volumeName(self._name, mountPath, pvConfig),
+      local declaration = if emptyDir then declareVolume(k.core.v1.volume.fromEmptyDir(volumeName))
+      else $.withClaimTemplate(volumeName, config),
+      local mount = $.withVolumeMount(
+        mountPath,
+        volumeName,
+        readOnly=if std.objectHas(pvConfig, 'readOnly') then pvConfig.readOnly else false,
+        subPath=if std.objectHas(pvConfig, 'subPath') then pvConfig.subPath else null
+      ),
+      _claimTemplates+:: if emptyDir then [] else [
+        entry { mountPath: mountPath } for entry in declaration._claimTemplates
+      ],
+      _volumes+:: if emptyDir then declaration._volumes else [],
+      _volumeMounts+:: mount._volumeMounts,
+      _mountPaths+:: mount._mountPaths,
+    },
+  '#withClaimTemplate':: d.fn(
+    help=|||
+      Declare managed StatefulSet storage without mounting it. config accepts size (required), accessModes (default ['ReadWriteOnce']), and storageClassName (default null). The name is the claim-template and volume name and must be a Kubernetes volume name. Repeated equal definitions deduplicate; conflicting definitions fail. Templates declared here render in alphabetical name order; withPV templates retain alphabetical mount-path order. Mount it with withVolumeMount. Declarations and references resolve against the final composed configuration, so their order does not matter.
+
+      ```jsonnet
+      labsonnet.new('probe', 'example:1')
+      + labsonnet.withType('StatefulSet')
+      + labsonnet.withPort({ port: 8080 })
+      + labsonnet.withClaimTemplate('state', { size: '2Gi', storageClassName: 'fast' })
+      + labsonnet.withVolumeMount('/config', 'state', subPath='config')
+      + labsonnet.withVolumeMount('/data', 'state', subPath='data')
+      ```
+    |||,
+    args=[d.arg('name', d.T.string), d.arg('config', d.T.object)],
+  ),
+  withClaimTemplate(name, config):: { _claimTemplates+:: [{ name: name, config: config }] },
+  '#withExistingPVC':: d.fn(
+    help=|||
+      Declare a volume referencing an existing PVC in the workload namespace, without creating or managing that claim. Works with Deployment and StatefulSet. volumeName must be a Kubernetes volume name; claimName is independent and may be a longer or dotted PVC name. Repeated equal definitions deduplicate; conflicting definitions fail. This API does not add a mount.
+
+      ```jsonnet
+      labsonnet.new('reader', 'example:1')
+      + labsonnet.withPort({ port: 8080 })
+      + labsonnet.withExistingPVC('media', 'shared-media')
+      + labsonnet.withVolumeMount('/movies', 'media', readOnly=true, subPath='movies')
+      + labsonnet.withVolumeMount('/series', 'media', readOnly=true, subPath='series')
+      ```
+    |||,
+    args=[d.arg('volumeName', d.T.string), d.arg('claimName', d.T.string)],
+  ),
+  withExistingPVC(volumeName, claimName)::
+    declareVolume(k.core.v1.volume.fromPersistentVolumeClaim(volumeName, claimName)),
+  '#withVolumeMount':: d.fn(
+    help='Mount a declared volume or claim template. References resolve after composition, so declarations can appear before or after mounts. Also accepts volume names supplied by withPV, withEmptyDir, withSecretMount, withConfigMapMount, or withExternalSecretMount. Each mount has independent readOnly and subPath; null subPath omits the field. Different paths accumulate. Each mount path may be declared only once across all mount APIs, including identical repeats. Unknown references and conflicting volume definitions fail.',
+    args=[
+      d.arg('mountPath', d.T.string),
+      d.arg('volumeName', d.T.string),
+      d.arg('readOnly', d.T.boolean, false),
+      d.arg('subPath', d.T.string, null),
+    ],
+  ),
+  withVolumeMount(mountPath, volumeName, readOnly=false, subPath=null):: {
+    _volumeMounts+:: { [mountPath]: { name: volumeName, readOnly: readOnly, subPath: subPath } },
+    _mountPaths+:: [mountPath],
+  },
   '#withEmptyDir':: d.fn(
-    help='Add an emptyDir volume mount to the app',
+    help='Add an emptyDir volume mount to the app. Duplicate mount paths across all mount APIs fail, including identical repeats.',
     args=[d.arg('mountPath', d.T.string)],
   ),
-  withEmptyDir(mountPath):: { _pvs+:: { [mountPath]: { emptyDir: true } } },
+  withEmptyDir(mountPath):: $.withPV(mountPath, { emptyDir: true }),
   '#withConfigMapMount':: d.fn(
-    help='Add a configMap volume mount to the app',
+    help='Add a configMap volume mount to the app. Duplicate mount paths across all mount APIs fail, including identical repeats.',
     args=[
       d.arg('mountPath', d.T.string),
       d.arg('name', d.T.string),
@@ -606,9 +675,10 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withConfigMapMount(mountPath, name, readOnly=true):: {
     _configMapMounts+:: { [mountPath]: { name: name, readOnly: readOnly } },
+    _mountPaths+:: [mountPath],
   },
   '#withSecretMount':: d.fn(
-    help='Add a secret volume mount to the app',
+    help='Add a secret volume mount to the app. Duplicate mount paths across all mount APIs fail, including identical repeats.',
     args=[
       d.arg('mountPath', d.T.string),
       d.arg('name', d.T.string),
@@ -617,6 +687,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withSecretMount(mountPath, name, readOnly=true):: {
     _secrets+:: { [mountPath]: { name: name, readOnly: readOnly } },
+    _mountPaths+:: [mountPath],
   },
   '#withEnv':: d.fn(
     help='Add environment variables to the app',
@@ -643,7 +714,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withExternalSecretEnvs(name, envs, cfg):: { _externalSecrets+:: { [name]+: cfg { envs: envs } } },
   '#withExternalSecretMount':: d.fn(
-    help='Add an external secret mounted as a volume. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }',
+    help='Add an external secret mounted as a volume. Duplicate mount paths across all mount APIs fail, including identical repeats; the same secret may be mounted at different paths. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }',
     args=[
       d.arg('name', d.T.string),
       d.arg('mountPath', d.T.string),
@@ -653,7 +724,8 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withExternalSecretMount(name, mountPath, cfg, readOnly=true):: {
     _externalSecrets+:: { [name]+: cfg },
-    _externalSecretMounts+:: { [name]: { mountPath: mountPath, readOnly: readOnly } },
+    _externalSecretMounts+:: { [mountPath]: { name: name, mountPath: mountPath, readOnly: readOnly } },
+    _mountPaths+:: [mountPath],
   },
   '#withImagePullSecrets':: d.fn(
     help='Add image pull secrets to the app',

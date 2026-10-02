@@ -7,22 +7,13 @@ local helpers = import 'helpers/pvc.libsonnet';
     if std.objectHas(pvConfig, 'name') then pvConfig.name
     else '%s-%s' % [serviceName, std.strReplace(std.lstripChars(mountPath, '/'), '/', '-')],
 
-  new(name, namespace, mountPath, pvcConfig, labels)::
-    local pvcName = $.volumeName(name, mountPath, pvcConfig);
-
+  new(name, namespace, config, labels)::
     helpers.new(
-      pvcName,
+      name,
       namespace,
-      pvcConfig.size,
-      accessModes=if std.objectHas(pvcConfig, 'accessModes') then pvcConfig.accessModes else ['ReadWriteOnce'],
-      storageClassName=if std.objectHas(pvcConfig, 'storageClassName') then pvcConfig.storageClassName else null,
+      config.size,
+      accessModes=if std.objectHas(config, 'accessModes') then config.accessModes else ['ReadWriteOnce'],
+      storageClassName=if std.objectHas(config, 'storageClassName') then config.storageClassName else null,
       labels=labels,
-    ),
-
-  build(name, namespace, pvs, labels)::
-    std.filterMap(
-      function(mountPath) !(std.objectHas(pvs[mountPath], 'emptyDir') && pvs[mountPath].emptyDir),
-      function(mountPath) $.new(name, namespace, mountPath, pvs[mountPath], labels),
-      std.objectFields(pvs)
     ),
 }
