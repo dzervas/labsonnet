@@ -19,16 +19,27 @@ local serviceMonitorHelper = import 'helpers/servicemonitor.libsonnet';
 local routingMeta = gatewayLib.meta + ingressLib.meta;
 local routingKeys = std.objectFields(routingMeta);
 
+// Context deliberately excludes accumulators and rendered resources: callbacks
+// depend only on final identity, never on the field currently being resolved.
+local serviceContext(service) = { name: service._name, namespace: service._namespace };
+local resolveObject(value, ctx, helper) =
+  local result = if std.isFunction(value) then value(ctx) else value;
+  assert std.isObject(result) : 'labsonnet: %s requires an object or a callback returning an object' % helper;
+  result;
+
 local declareVolume(v) = { _volumes+:: [v] };
 
 
 local portRoutingKeys(port) = std.filter(function(rk) std.objectHas(port, rk), routingKeys);
 
-local addPort(portEntry, headless) =
-  assert std.isObject(portEntry) : 'each port entry must be an object';
-  assert !std.objectHas(portEntry, 'service') && !std.objectHas(portEntry, 'headlessService') :
-         'use withPort() or withHeadlessPort() to choose Service exposure';
-  { _ports+:: [portEntry { service: !headless, headlessService: headless }] };
+local addPort(portEntry, headless) = {
+  local helper = if headless then 'withHeadlessPort' else 'withPort',
+  local entry = resolveObject(portEntry, serviceContext(self), helper),
+  _ports+::
+    assert !std.objectHas(entry, 'service') && !std.objectHas(entry, 'headlessService') :
+           'use withPort() or withHeadlessPort() to choose Service exposure';
+    [entry { service: !headless, headlessService: headless }],
+};
 
 local processPort(port) =
   local rkeys = portRoutingKeys(port);
@@ -75,7 +86,42 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   '#':: d.pkg(
     name='labsonnet',
     url='https://github.com/dzervas/labsonnet',
-    help='Commonly used components to define a Kubernetes workload, mainly from a bare docker image',
+    help=|||
+      Commonly used components to define a Kubernetes workload, mainly from a bare docker image
+
+      ### Lazy configuration callbacks
+
+      Pass a function when your config needs the app's final name or namespace:
+
+      ```jsonnet
+      local lab = import 'main.libsonnet';
+      lab.new('worker', 'example:1')
+      + lab.withEnv(function(ctx) {
+        APP_NAME: ctx.name,
+        APP_NAMESPACE: ctx.namespace,
+      })
+      + lab.withNamespace('apps')  // The callback sees 'apps'.
+      ```
+
+      The context contains only these fields:
+
+      | Field | Value |
+      | --- | --- |
+      | `name` | App/workload name passed to `new`; unaffected by `withServiceName`. |
+      | `namespace` | Final namespace, defaulting to the app name. `withNamespace` can appear before or after the helper. |
+
+      Supported by `withPort`, `withHeadlessPort`, `withEnv`, `withFieldRefEnv`,
+      and `withSecretEnv`, plus `withPV`'s `pvConfig` and `withClaimTemplate`'s
+      `config`. Other helper arguments keep their existing APIs.
+
+      - Return an object with the usual helper schema. Other return types are rejected; nested callbacks are not evaluated.
+      - Evaluation happens when needed, before validation and rendering. Helpers can be reused across apps.
+      - Keep callbacks pure. Use `ctx` and captured inputs; reading the app being built can cause a cycle. Do not rely on how many times a callback runs.
+      - Existing objects, merge order, port deduplication, and storage conflict checks work as before.
+
+      Callbacks can derive names, references, or settings anywhere in the returned
+      object, including nested route and storage configuration.
+    |||,
     filename=std.thisFile,
     version='main'
   ),
@@ -571,53 +617,52 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   // --- Merge/append accumulators ---
 
   '#withPort':: d.fn(
-    help='Add a container port exposed on the ordinary Service. Routing configs accept `name` to override the resource name while keeping output keys based on port names.',
-    args=[d.arg('portEntry', d.T.object)],
+    help='Add a container port exposed on the ordinary Service. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above. Routing configs accept `name` to override the resource name while keeping output keys based on port names.',
+    args=[d.arg('portEntry', 'object | function(ctx) object')],
   ),
   withPort(portEntry):: addPort(portEntry, false),
   '#withHeadlessPort':: d.fn(
-    help='Add a container port exposed on the headless Service. Use withHeadlessService() to enable headless Service generation.',
-    args=[d.arg('portEntry', d.T.object)],
+    help='Add a container port exposed on the headless Service. Use withHeadlessService() to enable headless Service generation. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.',
+    args=[d.arg('portEntry', 'object | function(ctx) object')],
   ),
   withHeadlessPort(portEntry):: addPort(portEntry, true),
   '#withPV':: d.fn(
     help=|||
-      Convenience wrapper over storage declaration and withVolumeMount, declaring managed storage and mounting it in one call. pvConfig supports name, size, accessModes, storageClassName, readOnly (default false), subPath (default null), and emptyDir. Persistent storage requires StatefulSet. Names default to `<workload>-<mount-path-with-dashes>`; storage defaults are ReadWriteOnce and no explicit storage class. Each mount path may be declared only once across all mount APIs, including identical repeats. Use withVolumeMount at another path to mount its named volume again.
+      Convenience wrapper over storage declaration and withVolumeMount, declaring managed storage and mounting it in one call. pvConfig accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above. pvConfig supports name, size, accessModes, storageClassName, readOnly (default false), subPath (default null), and emptyDir. Persistent storage requires StatefulSet. Names default to `<workload>-<mount-path-with-dashes>`; storage defaults are ReadWriteOnce and no explicit storage class. Each mount path may be declared only once across all mount APIs, including identical repeats. Use withVolumeMount at another path to mount its named volume again.
     |||,
     args=[
       d.arg('mountPath', d.T.string),
-      d.arg('pvConfig', d.T.object),
+      d.arg('pvConfig', 'object | function(ctx) object'),
     ],
   ),
-  withPV(mountPath, pvConfig)::
-    assert std.isObject(pvConfig) : 'labsonnet: pvConfig must be an object';
-    local emptyDir = std.objectHas(pvConfig, 'emptyDir') && pvConfig.emptyDir;
+  withPV(mountPath, pvConfig):: {
+    local pv = resolveObject(pvConfig, serviceContext(self), 'withPV'),
+    local emptyDir = std.objectHas(pv, 'emptyDir') && pv.emptyDir,
     local config = {
-      [field]: pvConfig[field]
+      [field]: pv[field]
       for field in ['size', 'accessModes', 'storageClassName']
-      if std.objectHas(pvConfig, field)
-    };
-    {
-      // Resolve convenience names against the final workload name, as before.
-      local volumeName = pvcLib.volumeName(self._name, mountPath, pvConfig),
-      local declaration = if emptyDir then declareVolume(k.core.v1.volume.fromEmptyDir(volumeName))
-      else $.withClaimTemplate(volumeName, config),
-      local mount = $.withVolumeMount(
-        mountPath,
-        volumeName,
-        readOnly=if std.objectHas(pvConfig, 'readOnly') then pvConfig.readOnly else false,
-        subPath=if std.objectHas(pvConfig, 'subPath') then pvConfig.subPath else null
-      ),
-      _claimTemplates+:: if emptyDir then [] else [
-        entry { mountPath: mountPath } for entry in declaration._claimTemplates
-      ],
-      _volumes+:: if emptyDir then declaration._volumes else [],
-      _volumeMounts+:: mount._volumeMounts,
-      _mountPaths+:: mount._mountPaths,
+      if std.objectHas(pv, field)
     },
+    // Resolve convenience names against the final workload name, as before.
+    local volumeName = pvcLib.volumeName(self._name, mountPath, pv),
+    local declaration = if emptyDir then declareVolume(k.core.v1.volume.fromEmptyDir(volumeName))
+    else $.withClaimTemplate(volumeName, config),
+    local mount = $.withVolumeMount(
+      mountPath,
+      volumeName,
+      readOnly=if std.objectHas(pv, 'readOnly') then pv.readOnly else false,
+      subPath=if std.objectHas(pv, 'subPath') then pv.subPath else null
+    ),
+    _claimTemplates+:: if emptyDir then [] else [
+      entry { mountPath: mountPath } for entry in declaration._claimTemplates
+    ],
+    _volumes+:: if emptyDir then declaration._volumes else [],
+    _volumeMounts+:: mount._volumeMounts,
+    _mountPaths+:: mount._mountPaths,
+  },
   '#withClaimTemplate':: d.fn(
     help=|||
-      Declare managed StatefulSet storage without mounting it. config accepts size (required), accessModes (default ['ReadWriteOnce']), and storageClassName (default null). The name is the claim-template and volume name and must be a Kubernetes volume name. Repeated equal definitions deduplicate; conflicting definitions fail. Templates declared here render in alphabetical name order; withPV templates retain alphabetical mount-path order. Mount it with withVolumeMount. Declarations and references resolve against the final composed configuration, so their order does not matter.
+      Declare managed StatefulSet storage without mounting it. config accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above. config accepts size (required), accessModes (default ['ReadWriteOnce']), and storageClassName (default null). The name is the claim-template and volume name and must be a Kubernetes volume name. Repeated equal definitions deduplicate; conflicting definitions fail. Templates declared here render in alphabetical name order; withPV templates retain alphabetical mount-path order. Mount it with withVolumeMount. Declarations and references resolve against the final composed configuration, so their order does not matter.
 
       ```jsonnet
       labsonnet.new('probe', 'example:1')
@@ -628,9 +673,12 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
       + labsonnet.withVolumeMount('/data', 'state', subPath='data')
       ```
     |||,
-    args=[d.arg('name', d.T.string), d.arg('config', d.T.object)],
+    args=[d.arg('name', d.T.string), d.arg('config', 'object | function(ctx) object')],
   ),
-  withClaimTemplate(name, config):: { _claimTemplates+:: [{ name: name, config: config }] },
+  withClaimTemplate(name, config):: {
+    local resolved = resolveObject(config, serviceContext(self), 'withClaimTemplate'),
+    _claimTemplates+:: [{ name: name, config: resolved }],
+  },
   '#withExistingPVC':: d.fn(
     help=|||
       Declare a volume referencing an existing PVC in the workload namespace, without creating or managing that claim. Works with Deployment and StatefulSet. volumeName must be a Kubernetes volume name; claimName is independent and may be a longer or dotted PVC name. Repeated equal definitions deduplicate; conflicting definitions fail. This API does not add a mount.
@@ -690,20 +738,20 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
     _mountPaths+:: [mountPath],
   },
   '#withEnv':: d.fn(
-    help='Add environment variables to the app',
-    args=[d.arg('env', d.T.object)],
+    help='Add environment variables to the app. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.',
+    args=[d.arg('env', 'object | function(ctx) object')],
   ),
-  withEnv(env):: { _env+:: env },
+  withEnv(env):: { _env+:: resolveObject(env, serviceContext(self), 'withEnv') },
   '#withFieldRefEnv':: d.fn(
-    help='Add environment variable references to the app',
-    args=[d.arg('envs', d.T.object)],
+    help='Add environment variable references to the app. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.',
+    args=[d.arg('envs', 'object | function(ctx) object')],
   ),
-  withFieldRefEnv(envs):: { _fieldRefEnvs+:: envs },
+  withFieldRefEnv(envs):: { _fieldRefEnvs+:: resolveObject(envs, serviceContext(self), 'withFieldRefEnv') },
   '#withSecretEnv':: d.fn(
-    help='Add environment variables from existing Kubernetes Secrets',
-    args=[d.arg('envs', d.T.object)],
+    help='Add environment variables from existing Kubernetes Secrets. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.',
+    args=[d.arg('envs', 'object | function(ctx) object')],
   ),
-  withSecretEnv(envs):: { _secretEnvs+:: envs },
+  withSecretEnv(envs):: { _secretEnvs+:: resolveObject(envs, serviceContext(self), 'withSecretEnv') },
   '#withExternalSecretEnvs':: d.fn(
     help='Add an external secret with environment variable mappings. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }',
     args=[

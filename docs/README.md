@@ -1,6 +1,40 @@
 # labsonnet
 
 Commonly used components to define a Kubernetes workload, mainly from a bare docker image
+
+### Lazy configuration callbacks
+
+Pass a function when your config needs the app's final name or namespace:
+
+```jsonnet
+local lab = import 'main.libsonnet';
+lab.new('worker', 'example:1')
++ lab.withEnv(function(ctx) {
+  APP_NAME: ctx.name,
+  APP_NAMESPACE: ctx.namespace,
+})
++ lab.withNamespace('apps')  // The callback sees 'apps'.
+```
+
+The context contains only these fields:
+
+| Field | Value |
+| --- | --- |
+| `name` | App/workload name passed to `new`; unaffected by `withServiceName`. |
+| `namespace` | Final namespace, defaulting to the app name. `withNamespace` can appear before or after the helper. |
+
+Supported by `withPort`, `withHeadlessPort`, `withEnv`, `withFieldRefEnv`,
+and `withSecretEnv`, plus `withPV`'s `pvConfig` and `withClaimTemplate`'s
+`config`. Other helper arguments keep their existing APIs.
+
+- Return an object with the usual helper schema. Other return types are rejected; nested callbacks are not evaluated.
+- Evaluation happens when needed, before validation and rendering. Helpers can be reused across apps.
+- Keep callbacks pure. Use `ctx` and captured inputs; reading the app being built can cause a cycle. Do not rely on how many times a callback runs.
+- Existing objects, merge order, port deduplication, and storage conflict checks work as before.
+
+Callbacks can derive names, references, or settings anywhere in the returned
+object, including nested route and storage configuration.
+
 ## Install
 
 ```
@@ -115,9 +149,9 @@ withClaimTemplate(name, config)
 PARAMETERS:
 
 * **name** (`string`)
-* **config** (`object`)
+* **config** (`object | function(ctx) object`)
 
-Declare managed StatefulSet storage without mounting it. config accepts size (required), accessModes (default ['ReadWriteOnce']), and storageClassName (default null). The name is the claim-template and volume name and must be a Kubernetes volume name. Repeated equal definitions deduplicate; conflicting definitions fail. Templates declared here render in alphabetical name order; withPV templates retain alphabetical mount-path order. Mount it with withVolumeMount. Declarations and references resolve against the final composed configuration, so their order does not matter.
+Declare managed StatefulSet storage without mounting it. config accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above. config accepts size (required), accessModes (default ['ReadWriteOnce']), and storageClassName (default null). The name is the claim-template and volume name and must be a Kubernetes volume name. Repeated equal definitions deduplicate; conflicting definitions fail. Templates declared here render in alphabetical name order; withPV templates retain alphabetical mount-path order. Mount it with withVolumeMount. Declarations and references resolve against the final composed configuration, so their order does not matter.
 
 ```jsonnet
 labsonnet.new('probe', 'example:1')
@@ -195,9 +229,9 @@ withEnv(env)
 
 PARAMETERS:
 
-* **env** (`object`)
+* **env** (`object | function(ctx) object`)
 
-Add environment variables to the app
+Add environment variables to the app. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.
 ### fn withExistingPVC
 
 ```jsonnet
@@ -255,9 +289,9 @@ withFieldRefEnv(envs)
 
 PARAMETERS:
 
-* **envs** (`object`)
+* **envs** (`object | function(ctx) object`)
 
-Add environment variable references to the app
+Add environment variable references to the app. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.
 ### fn withFqdn
 
 ```jsonnet
@@ -277,9 +311,9 @@ withHeadlessPort(portEntry)
 
 PARAMETERS:
 
-* **portEntry** (`object`)
+* **portEntry** (`object | function(ctx) object`)
 
-Add a container port exposed on the headless Service. Use withHeadlessService() to enable headless Service generation.
+Add a container port exposed on the headless Service. Use withHeadlessService() to enable headless Service generation. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.
 ### fn withHeadlessService
 
 ```jsonnet
@@ -368,9 +402,9 @@ withPV(mountPath, pvConfig)
 PARAMETERS:
 
 * **mountPath** (`string`)
-* **pvConfig** (`object`)
+* **pvConfig** (`object | function(ctx) object`)
 
-Convenience wrapper over storage declaration and withVolumeMount, declaring managed storage and mounting it in one call. pvConfig supports name, size, accessModes, storageClassName, readOnly (default false), subPath (default null), and emptyDir. Persistent storage requires StatefulSet. Names default to `<workload>-<mount-path-with-dashes>`; storage defaults are ReadWriteOnce and no explicit storage class. Each mount path may be declared only once across all mount APIs, including identical repeats. Use withVolumeMount at another path to mount its named volume again.
+Convenience wrapper over storage declaration and withVolumeMount, declaring managed storage and mounting it in one call. pvConfig accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above. pvConfig supports name, size, accessModes, storageClassName, readOnly (default false), subPath (default null), and emptyDir. Persistent storage requires StatefulSet. Names default to `<workload>-<mount-path-with-dashes>`; storage defaults are ReadWriteOnce and no explicit storage class. Each mount path may be declared only once across all mount APIs, including identical repeats. Use withVolumeMount at another path to mount its named volume again.
 
 ### fn withPodAnnotations
 
@@ -424,9 +458,9 @@ withPort(portEntry)
 
 PARAMETERS:
 
-* **portEntry** (`object`)
+* **portEntry** (`object | function(ctx) object`)
 
-Add a container port exposed on the ordinary Service. Routing configs accept `name` to override the resource name while keeping output keys based on port names.
+Add a container port exposed on the ordinary Service. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above. Routing configs accept `name` to override the resource name while keeping output keys based on port names.
 ### fn withReadinessProbe
 
 ```jsonnet
@@ -479,9 +513,9 @@ withSecretEnv(envs)
 
 PARAMETERS:
 
-* **envs** (`object`)
+* **envs** (`object | function(ctx) object`)
 
-Add environment variables from existing Kubernetes Secrets
+Add environment variables from existing Kubernetes Secrets. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.
 ### fn withSecretMount
 
 ```jsonnet
