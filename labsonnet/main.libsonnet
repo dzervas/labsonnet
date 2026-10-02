@@ -227,8 +227,8 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
     assert me._podManagementPolicy == null
            || (me._type == 'StatefulSet' && (me._podManagementPolicy == 'OrderedReady' || me._podManagementPolicy == 'Parallel')) :
            "labsonnet '%s': 'podManagementPolicy' must be 'OrderedReady' or 'Parallel' and requires StatefulSet type" % me._name,
-    assert std.isNumber(me._replicas) && me._replicas > 0 :
-           "labsonnet '%s': 'replicas' must be a positive integer" % me._name,
+    assert std.isNumber(me._replicas) && me._replicas >= 0 && std.floor(me._replicas) == me._replicas :
+           "labsonnet '%s': 'replicas' must be a non-negative integer" % me._name,
     assert std.isNumber(me._runAsUser) :
            "labsonnet '%s': 'runAsUser' must be a number" % me._name,
 
@@ -461,7 +461,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withType(type):: { _type:: type },
   '#withReplicas':: d.fn(
-    help='Set the number of replicas for the app',
+    help='Set the number of replicas for the app (a non-negative integer)',
     args=[d.arg('replicas', d.T.number)],
   ),
   withReplicas(n):: { _replicas:: n },
@@ -563,7 +563,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   withSecurityContext(ctx):: { _securityContext:: ctx },
   // Pod-level: overrides fsGroup, runAsNonRoot, supplementalGroups, etc.
   '#withPodSecurityContext':: d.fn(
-    help='Set the pod-level security context overrides',
+    help='Set pod-level security context overrides. Top-level fields set to null are omitted from the final context, so use values such as { fsGroup: null, fsGroupChangePolicy: null } to remove those defaults. As with other scalar hidden fields, the last withPodSecurityContext() call supplies the overrides.',
     args=[d.arg('ctx', d.T.object)],
   ),
   withPodSecurityContext(ctx):: { _podSecurityContext:: ctx },

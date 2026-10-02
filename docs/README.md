@@ -415,7 +415,7 @@ PARAMETERS:
 
 * **ctx** (`object`)
 
-Set the pod-level security context overrides
+Set pod-level security context overrides. Top-level fields set to null are omitted from the final context, so use values such as { fsGroup: null, fsGroupChangePolicy: null } to remove those defaults. As with other scalar hidden fields, the last withPodSecurityContext() call supplies the overrides.
 ### fn withPort
 
 ```jsonnet
@@ -448,7 +448,7 @@ PARAMETERS:
 
 * **replicas** (`number`)
 
-Set the number of replicas for the app
+Set the number of replicas for the app (a non-negative integer)
 ### fn withResources
 
 ```jsonnet
