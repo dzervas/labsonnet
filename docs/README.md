@@ -368,7 +368,7 @@ PARAMETERS:
 
 * **ctx** (`object`)
 
-Set the pod-level security context overrides
+Set pod-level security context overrides. Top-level fields set to null are omitted from the final context, so use values such as { fsGroup: null, fsGroupChangePolicy: null } to remove those defaults. As with other scalar hidden fields, the last withPodSecurityContext() call supplies the overrides.
 ### fn withPort
 
 ```jsonnet

@@ -155,14 +155,22 @@ local volumeMount = k.core.v1.volumeMount;
       {}
     );
 
-    // Build default pod security context, then merge user overrides
-    local defaultPodSecCtx =
-      workload.spec.template.spec.securityContext.withFsGroup(cfg.runAsUser)
-      + workload.spec.template.spec.securityContext.withFsGroupChangePolicy('OnRootMismatch')
-      + workload.spec.template.spec.securityContext.withRunAsNonRoot(true);
-    local podSecCtxOverride =
-      if std.length(std.objectFields(cfg.podSecurityContext)) > 0
-      then { spec+: { template+: { spec+: { securityContext+: cfg.podSecurityContext } } } }
+    // Merge overrides into the defaults, then omit explicit top-level nulls.
+    // Filtering the final value lets callers remove defaults while retaining
+    // false, zero, empty arrays, and empty objects as intentional values.
+    local mergedPodSecCtx = {
+      fsGroup: cfg.runAsUser,
+      fsGroupChangePolicy: 'OnRootMismatch',
+      runAsNonRoot: true,
+    } + cfg.podSecurityContext;
+    local finalPodSecCtx = {
+      [field]: mergedPodSecCtx[field]
+      for field in std.objectFields(mergedPodSecCtx)
+      if mergedPodSecCtx[field] != null
+    };
+    local podSecCtxMixin =
+      if std.length(std.objectFields(finalPodSecCtx)) > 0
+      then { spec+: { template+: { spec+: { securityContext: finalPodSecCtx } } } }
       else {};
 
     workload.new(name=name, replicas=cfg.replicas, containers=[ctr])
@@ -186,8 +194,7 @@ local volumeMount = k.core.v1.volumeMount;
     + (if std.length(inheritedContainers) > 0
        then { spec+: { template+: { spec+: { containers+: inheritedContainers } } } }
        else {})
-    + defaultPodSecCtx
-    + podSecCtxOverride
+    + podSecCtxMixin
     + workload.spec.template.metadata.withLabelsMixin(cfg.labels)
     + (if std.length(std.objectFields(cfg.podLabels)) > 0
        then workload.spec.template.metadata.withLabelsMixin(cfg.podLabels)
