@@ -81,7 +81,7 @@ Example:
 
 ```jsonnet
 labsonnet.new('hello-world', 'nginx:latest')
-+ labsonnet.withEnv('MY_VAR', 'my-value')
++ labsonnet.withEnv({ MY_VAR: 'my-value' })
 ```
 
 ### fn withAffinity

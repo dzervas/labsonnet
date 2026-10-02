@@ -91,7 +91,7 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
 
       ```jsonnet
       labsonnet.new('hello-world', 'nginx:latest')
-      + labsonnet.withEnv('MY_VAR', 'my-value')
+      + labsonnet.withEnv({ MY_VAR: 'my-value' })
       ```
     |||,
     args=[
