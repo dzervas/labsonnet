@@ -13,6 +13,7 @@ local ingressLib = import 'ingress.libsonnet';
 local gatewayLib = import 'gateway.libsonnet';
 local externalSecretLib = import 'externalsecret.libsonnet';
 local serviceMonitorHelper = import 'helpers/servicemonitor.libsonnet';
+local imageVolumeHelper = import 'helpers/imagevolume.libsonnet';
 
 // Combined routing metadata: Gateway API routes + ingress.
 // Used for protocol inference, layer classification, and validation.
@@ -695,8 +696,18 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withExistingPVC(volumeName, claimName)::
     declareVolume(k.core.v1.volume.fromPersistentVolumeClaim(volumeName, claimName)),
+  '#withImageVolume':: d.fn(
+    help='Declare an image volume. Mount it separately with withVolumeMount(..., readOnly=true).',
+    args=[
+      d.arg('name', d.T.string),
+      d.arg('image', d.T.string),
+      d.arg('pullPolicy', d.T.string, null),
+    ],
+  ),
+  withImageVolume(name, image, pullPolicy=null)::
+    declareVolume(imageVolumeHelper.new(name, image, pullPolicy)),
   '#withVolumeMount':: d.fn(
-    help='Mount a declared volume or claim template. References resolve after composition, so declarations can appear before or after mounts. Also accepts volume names supplied by withPV, withEmptyDir, withSecretMount, withConfigMapMount, or withExternalSecretMount. Each mount has independent readOnly and subPath; null subPath omits the field. Different paths accumulate. Each mount path may be declared only once across all mount APIs, including identical repeats. Unknown references and conflicting volume definitions fail.',
+    help='Mount a declared volume or claim template. References resolve after composition, so declarations can appear before or after mounts. Also accepts volume names supplied by withPV, withEmptyDir, withSecretMount, withConfigMapMount, withExternalSecretMount, or withImageVolume. Each mount has independent readOnly and subPath; image volume mounts require readOnly=true; null subPath omits the field. Different paths accumulate. Each mount path may be declared only once across all mount APIs, including identical repeats. Unknown references and conflicting volume definitions fail.',
     args=[
       d.arg('mountPath', d.T.string),
       d.arg('volumeName', d.T.string),

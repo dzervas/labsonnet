@@ -77,6 +77,13 @@ local dedupDefinitions(entries) = std.foldl(
     local unknownNames = [m.name for m in std.objectValues(mounts) if !std.member(declaredNames, m.name)];
     assert std.length(unknownNames) == 0 :
       'labsonnet: unknown volume mount references: %s' % std.join(', ', unknownNames);
+    local imageNames = [v.name for v in cfg.volumes if std.objectHas(v, 'image')];
+    assert std.all([
+      m.readOnly
+      for m in std.objectValues(mounts)
+      if std.member(imageNames, m.name)
+    ]) :
+      'labsonnet: image volume mounts must set readOnly=true';
 
     {
       claims: [v.claim for v in definitions if v.kind == 'claimTemplate'],
