@@ -308,7 +308,7 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
     roleResource(name, clusterName, secretName, namespace, roleName, reclaimPolicy, spec),
 
   // Emit a tenant's Database, DatabaseRole, and credentials ExternalSecrets.
-  // credentials is either {mode:'remote', store, storeKind?, remoteKey, property}
+  // credentials is either {mode:'remote', store, storeKind?, remoteKey, property?}
   // or {mode:'generated', generatorName, generatorKind?, replicationStore?, replicationStoreKind?}.
   newTenant(name, clusterName, clusterNamespace, appNamespace=name, credentials=null, resourceName=null, secretName=null, databaseSpec={}, roleSpec={})::
     assert std.isObject(databaseSpec) && std.isObject(roleSpec) : 'labsonnet CNPG: tenant spec overrides must be objects';
@@ -335,11 +335,16 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
     assert if remote then
       nonEmptyString(std.get(credentials, 'store'))
       && nonEmptyString(std.get(credentials, 'remoteKey'))
-      && nonEmptyString(std.get(credentials, 'property'))
     else
       nonEmptyString(std.get(credentials, 'generatorName'))
       && (sameNamespace || nonEmptyString(std.get(credentials, 'replicationStore')))
-           : "labsonnet CNPG '%s': remote credentials require store, remoteKey, and property; generated credentials require generatorName and a replicationStore across namespaces" % name;
+           : "labsonnet CNPG '%s': remote credentials require store and remoteKey; generated credentials require generatorName and a replicationStore across namespaces" % name;
+    assert !remote || std.get(credentials, 'property') == null || nonEmptyString(credentials.property)
+           : 'labsonnet CNPG: credentials.property must be a non-empty string or null when supplied';
+    local passwordRemoteRef = {
+      key: credentials.remoteKey,
+      [if std.get(credentials, 'property') != null then 'property']: credentials.property,
+    };
     assert !std.objectHas(credentials, 'generatorKind') || (!remote && std.member(['Password', 'ClusterGenerator'], credentials.generatorKind))
            : "labsonnet CNPG '%s': generatorKind must be Password or ClusterGenerator for generated credentials" % name;
     assert !std.objectHas(credentials, 'storeKind') || (remote && nonEmptyString(credentials.storeKind))
@@ -357,7 +362,7 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
             credentials.store,
             std.get(credentials, 'storeKind'),
             roleTemplate,
-            [{ secretKey: 'password', remoteRef: { key: credentials.remoteKey, property: credentials.property } }],
+            [{ secretKey: 'password', remoteRef: passwordRemoteRef }],
             null,
             'Periodic',
             '1h'
@@ -387,7 +392,7 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
             credentials.store,
             std.get(credentials, 'storeKind'),
             appSecretTemplate(name, name, host),
-            [{ secretKey: 'password', remoteRef: { key: credentials.remoteKey, property: credentials.property } }],
+            [{ secretKey: 'password', remoteRef: passwordRemoteRef }],
             null,
             'Periodic',
             '1h'
