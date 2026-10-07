@@ -356,9 +356,9 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
     assert std.all(std.map(
       function(monitorName)
         local mon = me._serviceMonitors[monitorName];
-        std.member(portNames, mon.portName),
+        std.member([p.name for p in servicePorts], mon.portName),
       std.objectFields(me._serviceMonitors)
-    )) : "labsonnet '%s': each serviceMonitor must reference a valid port name" % me._name,
+    )) : "labsonnet '%s': each serviceMonitor must reference a port exposed by the ordinary Service" % me._name,
 
     // Custom resources
     assert me._resources == null || std.isObject(me._resources) :
