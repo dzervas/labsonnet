@@ -139,7 +139,14 @@ local volumeMount = k.core.v1.volumeMount;
       then { spec+: { template+: { spec+: { securityContext: finalPodSecCtx } } } }
       else {};
 
-    workload.new(name=name, replicas=cfg.replicas, containers=[ctr])
+    local baseWorkload = workload.new(name=name, replicas=cfg.replicas, containers=[ctr]);
+    local selectorLabels = baseWorkload.spec.selector.matchLabels + cfg.labels;
+    assert std.all([
+      !std.objectHas(cfg.podLabels, label) || cfg.podLabels[label] == selectorLabels[label]
+      for label in std.objectFields(selectorLabels)
+    ]) : "labsonnet '%s': pod labels must not override selector labels" % name;
+
+    baseWorkload
     + workload.spec.template.spec.withVolumes(cfg.storage.volumes)
     + (if cfg.type == 'StatefulSet' then
          workload.spec.withVolumeClaimTemplates(cfg.storage.claims)
