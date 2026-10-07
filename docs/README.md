@@ -68,6 +68,7 @@ local labsonnet = import "https://github.com/dzervas/labsonnet/labsonnet/main.li
 * [`fn withHeadlessPort(portEntry)`](#fn-withheadlessport)
 * [`fn withHeadlessService(name, publishNotReadyAddresses=true)`](#fn-withheadlessservice)
 * [`fn withImagePullSecrets(secrets)`](#fn-withimagepullsecrets)
+* [`fn withImageVolume(name, image, pullPolicy)`](#fn-withimagevolume)
 * [`fn withInitContainer(container)`](#fn-withinitcontainer)
 * [`fn withLivenessProbe(probe)`](#fn-withlivenessprobe)
 * [`fn withNamespace(ns)`](#fn-withnamespace)
@@ -338,6 +339,19 @@ PARAMETERS:
 * **secrets** (`array`)
 
 Add image pull secrets to the app
+### fn withImageVolume
+
+```jsonnet
+withImageVolume(name, image, pullPolicy)
+```
+
+PARAMETERS:
+
+* **name** (`string`)
+* **image** (`string`)
+* **pullPolicy** (`string`)
+
+Declare an image volume. Mount it separately with withVolumeMount(..., readOnly=true).
 ### fn withInitContainer
 
 ```jsonnet
@@ -613,4 +627,4 @@ PARAMETERS:
    - default value: `false`
 * **subPath** (`string`)
 
-Mount a declared volume or claim template. References resolve after composition, so declarations can appear before or after mounts. Also accepts volume names supplied by withPV, withEmptyDir, withSecretMount, withConfigMapMount, or withExternalSecretMount. Each mount has independent readOnly and subPath; null subPath omits the field. Different paths accumulate. Each mount path may be declared only once across all mount APIs, including identical repeats. Unknown references and conflicting volume definitions fail.
+Mount a declared volume or claim template. References resolve after composition, so declarations can appear before or after mounts. Also accepts volume names supplied by withPV, withEmptyDir, withSecretMount, withConfigMapMount, withExternalSecretMount, or withImageVolume. Each mount has independent readOnly and subPath; image volume mounts require readOnly=true; null subPath omits the field. Different paths accumulate. Each mount path may be declared only once across all mount APIs, including identical repeats. Unknown references and conflicting volume definitions fail.
