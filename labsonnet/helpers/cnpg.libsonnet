@@ -159,18 +159,15 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
       [if property != null then 'property']: property,
     },
 
-  generatedCredentials(generatorName, replicationStore=null, replicationStoreKind='ClusterSecretStore', replicationNamespace=null)::
+  generatedCredentials(generatorName, replicationStore=null, replicationStoreKind='ClusterSecretStore')::
     assert nonEmptyString(generatorName) : 'labsonnet CNPG: generated credentials require a non-empty generatorName';
     assert replicationStore == null || nonEmptyString(replicationStore) : 'labsonnet CNPG: generated credentials replicationStore must be a non-empty string or null';
     assert replicationStoreKind == null || nonEmptyString(replicationStoreKind) : 'labsonnet CNPG: generated credentials replicationStoreKind must be a non-empty string or null';
-    assert replicationNamespace == null || nonEmptyString(replicationNamespace)
-           : 'labsonnet CNPG: generated credentials replicationNamespace must be a non-empty string or null';
     {
       mode: 'generated',
       generatorName: generatorName,
       [if replicationStore != null then 'replicationStore']: replicationStore,
       [if replicationStore != null && replicationStoreKind != null then 'replicationStoreKind']: replicationStoreKind,
-      [if replicationNamespace != null then 'replicationNamespace']: replicationNamespace,
     },
 
   // Create a CNPG Cluster. Defaults are intentionally small and portable;
@@ -300,8 +297,8 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
   },
 
   // Build the shared External Secrets resources used for generated credentials.
-  // The replication Store is cluster-scoped, while its reader ServiceAccount and
-  // password generator live in the source namespace.
+  // The replication Store is cluster-scoped and the password generator lives in
+  // the source namespace. The reader ServiceAccount namespace is configurable.
   newCredentialInfrastructure(name, namespace='default', generatorName=null, passwordSpec={}, serviceAccountName=null, serviceAccountNamespace=namespace)::
     local actualGeneratorName = if generatorName == null then name + '-password' else generatorName;
     local store = externalSecret.newKubernetesReplicationStore(
@@ -408,16 +405,6 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
            : "labsonnet CNPG '%s': storeKind is only valid as a non-empty remote credential option" % name;
     assert !std.objectHas(credentials, 'replicationStoreKind') || (!remote && nonEmptyString(credentials.replicationStoreKind))
            : "labsonnet CNPG '%s': replicationStoreKind is only valid as a non-empty generated credential option" % name;
-    assert !std.objectHas(credentials, 'replicationNamespace') || !remote
-           : "labsonnet CNPG '%s': replicationNamespace is only valid for generated credentials" % name;
-    assert !std.objectHas(credentials, 'replicationNamespace')
-           || credentials.replicationNamespace == null
-           || validDnsLabel(credentials.replicationNamespace)
-           : "labsonnet CNPG '%s': replicationNamespace must be a valid namespace" % name;
-    assert sameNamespace
-           || std.get(credentials, 'replicationNamespace') == null
-           || credentials.replicationNamespace == clusterNamespace
-           : "labsonnet CNPG '%s': replicationNamespace must match clusterNamespace for cross-namespace credentials" % name;
     {
       role: role,
       database: databaseResource(tenantResourceName, name, clusterName, name, clusterNamespace, 'retain', databaseSpec),
