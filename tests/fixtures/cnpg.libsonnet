@@ -2,7 +2,75 @@ local cnpg = import '../../labsonnet/helpers/cnpg.libsonnet';
 local remote = { mode: 'remote', store: 'app-secrets', storeKind: 'ClusterSecretStore', remoteKey: 'app', property: 'password' };
 local generated = { mode: 'generated', generatorName: 'postgres-password' };
 
+local es = import '../../labsonnet/helpers/externalsecret.libsonnet';
+local infrastructure = cnpg.newCredentialInfrastructure('billing-export', 'ledger', generatorName='billing-generator');
+local customStore = es.newKubernetesReplicationStore('billing-export', 'ledger', serviceAccountName='billing-reader');
+local flow(setup) = {
+  infrastructure: setup,
+  tenant: cnpg.newTenant(
+    'billing',
+    clusterName='db-main',
+    clusterNamespace='ledger',
+    appNamespace='payments',
+    credentials=cnpg.generatedCredentials(
+      setup.passwordGenerator.metadata.name,
+      setup.credentialStore.metadata.name,
+      replicationServiceAccount={ name: setup.credentialReader.metadata.name },
+      replicationNamespace=setup.credentialStore.spec.provider.kubernetes.remoteNamespace
+    ),
+    resourceName='billing-owner',
+    secretName='billing-db-auth'
+  ),
+};
+
 {
+
+  generated_flows: {
+    defaultReader: flow(infrastructure),
+    customReader: flow({
+      passwordGenerator: es.newPasswordGenerator('billing-generator', 'ledger'),
+      credentialStore: customStore.credentialStore,
+      credentialReader: customStore.credentialReader,
+    }),
+  },
+  remote_key_flow: cnpg.newTenant(
+    'billing',
+    'db-main',
+    'ledger',
+    appNamespace='payments',
+    credentials=cnpg.remoteCredentials('ops-store', 'billing/password')
+  ),
+  grants_unneeded: {
+    sameNamespace: cnpg.newTenant(
+      'billing',
+      'db-main',
+      'ledger',
+      appNamespace='ledger',
+      credentials=cnpg.generatedCredentials('billing-generator', replicationServiceAccount={ name: 'billing-reader' })
+    ),
+    noReader: cnpg.newTenant(
+      'billing',
+      'db-main',
+      'ledger',
+      appNamespace='payments',
+      credentials=cnpg.generatedCredentials('billing-generator', 'billing-export')
+    ),
+    suppressed: cnpg.newTenant(
+      'billing',
+      'db-main',
+      'ledger',
+      appNamespace='payments',
+      credentials=cnpg.generatedCredentials('billing-generator', 'billing-export') + { replicationServiceAccount: null }
+    ),
+  },
+  unsafe_empty_grant: es.newSecretReadGrant('billing-owner', 'ledger', [], 'billing-reader'),
+  wrong_replication_source: cnpg.newTenant(
+    'billing',
+    'db-main',
+    'ledger',
+    appNamespace='payments',
+    credentials=cnpg.generatedCredentials('billing-generator', 'billing-export', replicationNamespace='other-database')
+  ),
   configured_cluster:
     cnpg.newCluster('shared')
     + cnpg.withNamespace('postgres')
@@ -23,35 +91,59 @@ local generated = { mode: 'generated', generatorName: 'postgres-password' };
     + cnpg.withClusterSpec({ instances: 4, postgresql: { parameters: { max_connections: '200' } } }),
 
   remote_cross_namespace: cnpg.newTenant(
-    'affine', clusterName='shared', clusterNamespace='postgres', appNamespace='apps',
-    credentials=remote, resourceName='affine-tenant', secretName='affine-credentials'
+    'affine',
+    clusterName='shared',
+    clusterNamespace='postgres',
+    appNamespace='apps',
+    credentials=remote,
+    resourceName='affine-tenant',
+    secretName='affine-credentials'
   ),
   remote_same_namespace: cnpg.newTenant(
-    'outline', clusterName='shared', clusterNamespace='postgres', appNamespace='postgres',
+    'outline',
+    clusterName='shared',
+    clusterNamespace='postgres',
+    appNamespace='postgres',
     credentials=remote
   ),
   generated_cross_namespace: cnpg.newTenant(
-    'paperless', clusterName='shared', clusterNamespace='postgres', appNamespace='paperless',
-    credentials=generated + {
-      generatorKind: 'ClusterGenerator', replicationStore: 'postgres-secrets',
+    'paperless',
+    clusterName='shared',
+    clusterNamespace='postgres',
+    appNamespace='paperless',
+    credentials=generated {
+      generatorKind: 'ClusterGenerator',
+      replicationStore: 'postgres-secrets',
       replicationStoreKind: 'ClusterSecretStore',
     }
   ),
   generated_same_namespace: cnpg.newTenant(
-    'grafana', clusterName='shared', clusterNamespace='postgres', appNamespace='postgres',
+    'grafana',
+    clusterName='shared',
+    clusterNamespace='postgres',
+    appNamespace='postgres',
     credentials=generated
   ),
 
   invalid_generated_replication: cnpg.newTenant(
-    'app', clusterName='shared', clusterNamespace='postgres', appNamespace='apps',
+    'app',
+    clusterName='shared',
+    clusterNamespace='postgres',
+    appNamespace='apps',
     credentials=generated
   ),
   invalid_database_identity: cnpg.newTenant(
-    'app', clusterName='shared', clusterNamespace='postgres', credentials=remote,
+    'app',
+    clusterName='shared',
+    clusterNamespace='postgres',
+    credentials=remote,
     databaseSpec={ name: 'different' }
   ),
   invalid_role_identity: cnpg.newTenant(
-    'app', clusterName='shared', clusterNamespace='postgres', credentials=remote,
+    'app',
+    clusterName='shared',
+    clusterNamespace='postgres',
+    credentials=remote,
     roleSpec={ passwordSecret: { name: 'different' } }
   ),
 }
