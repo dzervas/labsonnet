@@ -168,64 +168,65 @@ jb install github.com/dzervas/labsonnet/labsonnet@main
 local labsonnet = import 'labsonnet/main.libsonnet'
 ```
 
+
 ## Subpackages
 
-- [downstream](downstream.md)
-- [helpers.affinity](helpers/affinity.md)
-- [helpers.certificate](helpers/certificate.md)
-- [helpers.cnpg](helpers/cnpg.md)
-- [helpers.externalsecret](helpers/externalsecret.md)
-- [helpers.gateway](helpers/gateway.md)
-- [helpers.imagevolume](helpers/imagevolume.md)
-- [helpers.ingress](helpers/ingress.md)
-- [helpers.pvc](helpers/pvc.md)
-- [helpers.servicemonitor](helpers/servicemonitor.md)
+* [downstream](downstream.md)
+* [helpers.affinity](helpers/affinity.md)
+* [helpers.certificate](helpers/certificate.md)
+* [helpers.cnpg](helpers/cnpg.md)
+* [helpers.externalsecret](helpers/externalsecret.md)
+* [helpers.gateway](helpers/gateway.md)
+* [helpers.imagevolume](helpers/imagevolume.md)
+* [helpers.ingress](helpers/ingress.md)
+* [helpers.pvc](helpers/pvc.md)
+* [helpers.servicemonitor](helpers/servicemonitor.md)
 
 ## Index
 
-- [`fn new(name, image)`](#fn-new)
-- [`fn withAffinity(affinity)`](#fn-withaffinity)
-- [`fn withArgs(args)`](#fn-withargs)
-- [`fn withClaimTemplate(name, config)`](#fn-withclaimtemplate)
-- [`fn withCommand(command)`](#fn-withcommand)
-- [`fn withConfigMapMount(mountPath, name, readOnly=true)`](#fn-withconfigmapmount)
-- [`fn withContainer(container)`](#fn-withcontainer)
-- [`fn withCreateNamespace(create=true)`](#fn-withcreatenamespace)
-- [`fn withEmptyDir(mountPath)`](#fn-withemptydir)
-- [`fn withEnv(env)`](#fn-withenv)
-- [`fn withExistingPVC(volumeName, claimName)`](#fn-withexistingpvc)
-- [`fn withExternalSecretEnvs(name, envs, cfg)`](#fn-withexternalsecretenvs)
-- [`fn withExternalSecretMount(name, mountPath, cfg, readOnly=true)`](#fn-withexternalsecretmount)
-- [`fn withFieldRefEnv(envs)`](#fn-withfieldrefenv)
-- [`fn withFqdn(fqdn)`](#fn-withfqdn)
-- [`fn withHeadlessPort(portEntry)`](#fn-withheadlessport)
-- [`fn withHeadlessService(name=null, publishNotReadyAddresses=true)`](#fn-withheadlessservice)
-- [`fn withImagePullSecrets(secrets)`](#fn-withimagepullsecrets)
-- [`fn withImageVolume(name, image, pullPolicy=null)`](#fn-withimagevolume)
-- [`fn withInitContainer(container)`](#fn-withinitcontainer)
-- [`fn withLivenessProbe(probe)`](#fn-withlivenessprobe)
-- [`fn withNamespace(ns)`](#fn-withnamespace)
-- [`fn withNamespaceAnnotations(annotations)`](#fn-withnamespaceannotations)
-- [`fn withNamespaceLabels(labels)`](#fn-withnamespacelabels)
-- [`fn withPV(mountPath, pvConfig)`](#fn-withpv)
-- [`fn withPodAnnotations(annotations)`](#fn-withpodannotations)
-- [`fn withPodLabels(labels)`](#fn-withpodlabels)
-- [`fn withPodManagementPolicy(policy)`](#fn-withpodmanagementpolicy)
-- [`fn withPodSecurityContext(ctx)`](#fn-withpodsecuritycontext)
-- [`fn withPort(portEntry)`](#fn-withport)
-- [`fn withReadinessProbe(probe)`](#fn-withreadinessprobe)
-- [`fn withReplicas(replicas)`](#fn-withreplicas)
-- [`fn withResources(resources)`](#fn-withresources)
-- [`fn withRunAsUser(uid)`](#fn-withrunasuser)
-- [`fn withSecretEnv(envs)`](#fn-withsecretenv)
-- [`fn withSecretMount(mountPath, name, readOnly=true)`](#fn-withsecretmount)
-- [`fn withSecurityContext(ctx)`](#fn-withsecuritycontext)
-- [`fn withServiceMonitor(portName="metrics", path="/metrics", interval="30s", name=null)`](#fn-withservicemonitor)
-- [`fn withServiceName(name)`](#fn-withservicename)
-- [`fn withServiceType(type)`](#fn-withservicetype)
-- [`fn withStartupProbe(probe)`](#fn-withstartupprobe)
-- [`fn withType(type)`](#fn-withtype)
-- [`fn withVolumeMount(mountPath, volumeName, readOnly=false, subPath=null)`](#fn-withvolumemount)
+* [`fn new(name, image)`](#fn-new)
+* [`fn withAffinity(affinity)`](#fn-withaffinity)
+* [`fn withArgs(args)`](#fn-withargs)
+* [`fn withClaimTemplate(name, config)`](#fn-withclaimtemplate)
+* [`fn withCommand(command)`](#fn-withcommand)
+* [`fn withConfigMapMount(mountPath, name, readOnly=true)`](#fn-withconfigmapmount)
+* [`fn withContainer(container)`](#fn-withcontainer)
+* [`fn withCreateNamespace(create=true)`](#fn-withcreatenamespace)
+* [`fn withEmptyDir(mountPath)`](#fn-withemptydir)
+* [`fn withEnv(env)`](#fn-withenv)
+* [`fn withExistingPVC(volumeName, claimName)`](#fn-withexistingpvc)
+* [`fn withExternalSecretEnvs(name, envs, cfg)`](#fn-withexternalsecretenvs)
+* [`fn withExternalSecretMount(name, mountPath, cfg, readOnly=true)`](#fn-withexternalsecretmount)
+* [`fn withFieldRefEnv(envs)`](#fn-withfieldrefenv)
+* [`fn withFqdn(fqdn)`](#fn-withfqdn)
+* [`fn withHeadlessPort(portEntry)`](#fn-withheadlessport)
+* [`fn withHeadlessService(name=null, publishNotReadyAddresses=true)`](#fn-withheadlessservice)
+* [`fn withImagePullSecrets(secrets)`](#fn-withimagepullsecrets)
+* [`fn withImageVolume(name, image, pullPolicy=null)`](#fn-withimagevolume)
+* [`fn withInitContainer(container)`](#fn-withinitcontainer)
+* [`fn withLivenessProbe(probe)`](#fn-withlivenessprobe)
+* [`fn withNamespace(ns)`](#fn-withnamespace)
+* [`fn withNamespaceAnnotations(annotations)`](#fn-withnamespaceannotations)
+* [`fn withNamespaceLabels(labels)`](#fn-withnamespacelabels)
+* [`fn withPV(mountPath, pvConfig)`](#fn-withpv)
+* [`fn withPodAnnotations(annotations)`](#fn-withpodannotations)
+* [`fn withPodLabels(labels)`](#fn-withpodlabels)
+* [`fn withPodManagementPolicy(policy)`](#fn-withpodmanagementpolicy)
+* [`fn withPodSecurityContext(ctx)`](#fn-withpodsecuritycontext)
+* [`fn withPort(portEntry)`](#fn-withport)
+* [`fn withReadinessProbe(probe)`](#fn-withreadinessprobe)
+* [`fn withReplicas(replicas)`](#fn-withreplicas)
+* [`fn withResources(resources)`](#fn-withresources)
+* [`fn withRunAsUser(uid)`](#fn-withrunasuser)
+* [`fn withSecretEnv(envs)`](#fn-withsecretenv)
+* [`fn withSecretMount(mountPath, name, readOnly=true)`](#fn-withsecretmount)
+* [`fn withSecurityContext(ctx)`](#fn-withsecuritycontext)
+* [`fn withServiceMonitor(portName="metrics", path="/metrics", interval="30s", name=null)`](#fn-withservicemonitor)
+* [`fn withServiceName(name)`](#fn-withservicename)
+* [`fn withServiceType(type)`](#fn-withservicetype)
+* [`fn withStartupProbe(probe)`](#fn-withstartupprobe)
+* [`fn withType(type)`](#fn-withtype)
+* [`fn withVolumeMount(mountPath, volumeName, readOnly=false, subPath=null)`](#fn-withvolumemount)
 
 ## Fields
 
@@ -237,8 +238,8 @@ new(name, image)
 
 PARAMETERS:
 
-- **name** (`string`)
-- **image** (`string`)
+* **name** (`string`)
+* **image** (`string`)
 
 Create an app. Add at least one port before rendering. The name also sets the default namespace and Service name.
 
@@ -258,7 +259,7 @@ withAffinity(affinity)
 
 PARAMETERS:
 
-- **affinity** (`object | null`)
+* **affinity** (`object | null`)
 
 Set pod placement rules. Use the affinity helper to build them; pass `null` or `{}` to remove placement rules.
 
@@ -279,7 +280,7 @@ withArgs(args)
 
 PARAMETERS:
 
-- **args** (`array`)
+* **args** (`array`)
 
 Set arguments passed to the container entrypoint.
 
@@ -300,8 +301,8 @@ withClaimTemplate(name, config)
 
 PARAMETERS:
 
-- **name** (`string`)
-- **config** (`object | function(ctx) object`)
+* **name** (`string`)
+* **config** (`object | function(ctx) object`)
 
 Create a StatefulSet PVC by volume name, then mount it separately.
 Use this when one PVC needs several mounts. `config` accepts `size`
@@ -328,7 +329,7 @@ withCommand(command)
 
 PARAMETERS:
 
-- **command** (`array`)
+* **command** (`array`)
 
 Set the container entrypoint as an array of strings.
 
@@ -349,10 +350,10 @@ withConfigMapMount(mountPath, name, readOnly=true)
 
 PARAMETERS:
 
-- **mountPath** (`string`)
-- **name** (`string`)
-- **readOnly** (`bool`)
-  - default value: `true`
+* **mountPath** (`string`)
+* **name** (`string`)
+* **readOnly** (`bool`)
+   - default value: `true`
 
 Mount an existing ConfigMap from the app namespace. Read-only by default.
 
@@ -373,7 +374,7 @@ withContainer(container)
 
 PARAMETERS:
 
-- **container** (`object`)
+* **container** (`object`)
 
 Add a sidecar container using a Kubernetes container object. It inherits the main container's environment, mounts, and security settings.
 
@@ -394,8 +395,8 @@ withCreateNamespace(create=true)
 
 PARAMETERS:
 
-- **create** (`bool`)
-  - default value: `true`
+* **create** (`bool`)
+   - default value: `true`
 
 Create the app namespace when true. Namespace creation is disabled by default.
 
@@ -416,7 +417,7 @@ withEmptyDir(mountPath)
 
 PARAMETERS:
 
-- **mountPath** (`string`)
+* **mountPath** (`string`)
 
 Mount temporary storage. Data lasts only for the lifetime of the pod.
 
@@ -437,7 +438,7 @@ withEnv(env)
 
 PARAMETERS:
 
-- **env** (`object | function(ctx) object`)
+* **env** (`object | function(ctx) object`)
 
 Add plain environment variables as a map. Accepts an object or callback.
 
@@ -458,8 +459,8 @@ withExistingPVC(volumeName, claimName)
 
 PARAMETERS:
 
-- **volumeName** (`string`)
-- **claimName** (`string`)
+* **volumeName** (`string`)
+* **claimName** (`string`)
 
 Use a PVC that already exists in the app namespace. `volumeName` names
 the volume in the pod; `claimName` identifies the existing PVC. Add mounts
@@ -483,9 +484,9 @@ withExternalSecretEnvs(name, envs, cfg)
 
 PARAMETERS:
 
-- **name** (`string`)
-- **envs** (`object`)
-- **cfg** (`object`)
+* **name** (`string`)
+* **envs** (`object`)
+* **cfg** (`object`)
 
 Create an ExternalSecret and read its keys as environment variables. Map variable names to keys in the extracted remote object. `cfg.store` is required; `storeKind` defaults to `ClusterSecretStore` and `remoteKey` to the secret name.
 
@@ -510,11 +511,11 @@ withExternalSecretMount(name, mountPath, cfg, readOnly=true)
 
 PARAMETERS:
 
-- **name** (`string`)
-- **mountPath** (`string`)
-- **cfg** (`object`)
-- **readOnly** (`bool`)
-  - default value: `true`
+* **name** (`string`)
+* **mountPath** (`string`)
+* **cfg** (`object`)
+* **readOnly** (`bool`)
+   - default value: `true`
 
 Create an ExternalSecret and mount the resulting Secret read-only by default. Uses the same `cfg` fields as `withExternalSecretEnvs`. Extracts the whole remote object. A secret can be mounted at multiple distinct paths.
 
@@ -535,7 +536,7 @@ withFieldRefEnv(envs)
 
 PARAMETERS:
 
-- **envs** (`object | function(ctx) object`)
+* **envs** (`object | function(ctx) object`)
 
 Add environment variables from pod fields using the downward API. Map variable names to field paths. Accepts an object or callback.
 
@@ -556,7 +557,7 @@ withFqdn(fqdn)
 
 PARAMETERS:
 
-- **fqdn** (`string`)
+* **fqdn** (`string`)
 
 Set the default hostname for HTTP, gRPC, and Ingress routes. A route can override it with its own `fqdn`.
 
@@ -577,7 +578,7 @@ withHeadlessPort(portEntry)
 
 PARAMETERS:
 
-- **portEntry** (`object | function(ctx) object`)
+* **portEntry** (`object | function(ctx) object`)
 
 Expose a port through the headless Service for peer discovery. Enable it
 with `withHeadlessService()`. Uses the same fields as `withPort` and accepts
@@ -600,10 +601,10 @@ withHeadlessService(name=null, publishNotReadyAddresses=true)
 
 PARAMETERS:
 
-- **name** (`null`,`string`)
-  - default value: `null`
-- **publishNotReadyAddresses** (`bool`)
-  - default value: `true`
+* **name** (`null`,`string`)
+   - default value: `null`
+* **publishNotReadyAddresses** (`bool`)
+   - default value: `true`
 
 Create a headless Service for peer discovery. Its name defaults to `<app>-headless`; it also supplies the StatefulSet `serviceName`. Not-ready addresses are published by default. Add ports with `withHeadlessPort`.
 
@@ -626,7 +627,7 @@ withImagePullSecrets(secrets)
 
 PARAMETERS:
 
-- **secrets** (`array`)
+* **secrets** (`array`)
 
 Add names of existing image pull Secrets in the app namespace.
 
@@ -647,10 +648,10 @@ withImageVolume(name, image, pullPolicy=null)
 
 PARAMETERS:
 
-- **name** (`string`)
-- **image** (`string`)
-- **pullPolicy** (`null`,`string`)
-  - default value: `null`
+* **name** (`string`)
+* **image** (`string`)
+* **pullPolicy** (`null`,`string`)
+   - default value: `null`
 
 Use files from an OCI image. Add a mount with `readOnly=true`.
 Requires cluster support for image volumes. Optional `pullPolicy`:
@@ -674,7 +675,7 @@ withInitContainer(container)
 
 PARAMETERS:
 
-- **container** (`object`)
+* **container** (`object`)
 
 Add a container that runs before the app starts. It inherits the main container's environment, mounts, and security settings.
 
@@ -695,7 +696,7 @@ withLivenessProbe(probe)
 
 PARAMETERS:
 
-- **probe** (`object`)
+* **probe** (`object`)
 
 Set a probe that restarts an unhealthy container.
 
@@ -716,7 +717,7 @@ withNamespace(ns)
 
 PARAMETERS:
 
-- **ns** (`string`)
+* **ns** (`string`)
 
 Set the namespace for the app and its namespaced resources. The default is the app name.
 
@@ -737,7 +738,7 @@ withNamespaceAnnotations(annotations)
 
 PARAMETERS:
 
-- **annotations** (`object`)
+* **annotations** (`object`)
 
 Add namespace annotations. Call `withCreateNamespace()` to emit the Namespace resource.
 
@@ -759,7 +760,7 @@ withNamespaceLabels(labels)
 
 PARAMETERS:
 
-- **labels** (`object`)
+* **labels** (`object`)
 
 Add namespace labels. Call `withCreateNamespace()` to emit the Namespace resource.
 
@@ -781,8 +782,8 @@ withPV(mountPath, pvConfig)
 
 PARAMETERS:
 
-- **mountPath** (`string`)
-- **pvConfig** (`object | function(ctx) object`)
+* **mountPath** (`string`)
+* **pvConfig** (`object | function(ctx) object`)
 
 Create a PVC and mount it in one call. Requires a StatefulSet and `size`.
 
@@ -812,7 +813,7 @@ withPodAnnotations(annotations)
 
 PARAMETERS:
 
-- **annotations** (`object`)
+* **annotations** (`object`)
 
 Add annotations to the pod template.
 
@@ -833,7 +834,7 @@ withPodLabels(labels)
 
 PARAMETERS:
 
-- **labels** (`object`)
+* **labels** (`object`)
 
 Add pod labels. Labels used by the workload selector cannot be changed.
 
@@ -854,7 +855,7 @@ withPodManagementPolicy(policy)
 
 PARAMETERS:
 
-- **policy** (`string`)
+* **policy** (`string`)
 
 Set the StatefulSet pod management policy to `OrderedReady` or `Parallel`.
 
@@ -876,7 +877,7 @@ withPodSecurityContext(ctx)
 
 PARAMETERS:
 
-- **ctx** (`object`)
+* **ctx** (`object`)
 
 Override pod security defaults. Top-level null values remove fields. Each call replaces the previous override object.
 
@@ -897,7 +898,7 @@ withPort(portEntry)
 
 PARAMETERS:
 
-- **portEntry** (`object | function(ctx) object`)
+* **portEntry** (`object | function(ctx) object`)
 
 Expose a container port through the app's Service.
 
@@ -934,7 +935,7 @@ withReadinessProbe(probe)
 
 PARAMETERS:
 
-- **probe** (`object`)
+* **probe** (`object`)
 
 Set a probe that controls when the pod receives Service traffic.
 
@@ -955,7 +956,7 @@ withReplicas(replicas)
 
 PARAMETERS:
 
-- **replicas** (`number`)
+* **replicas** (`number`)
 
 Set the replica count, a non-negative integer. The default is 1.
 
@@ -976,7 +977,7 @@ withResources(resources)
 
 PARAMETERS:
 
-- **resources** (`object`)
+* **resources** (`object`)
 
 Set CPU and memory requests and limits using a Kubernetes resources object.
 
@@ -997,7 +998,7 @@ withRunAsUser(uid)
 
 PARAMETERS:
 
-- **uid** (`number`)
+* **uid** (`number`)
 
 Set the container UID and GID, plus the default pod `fsGroup`. The default is 1000.
 
@@ -1018,7 +1019,7 @@ withSecretEnv(envs)
 
 PARAMETERS:
 
-- **envs** (`object | function(ctx) object`)
+* **envs** (`object | function(ctx) object`)
 
 Read environment variables from existing Kubernetes Secrets in the app namespace. Map variables to `{ name: secretName, key: secretKey }`. Accepts an object or callback.
 
@@ -1039,10 +1040,10 @@ withSecretMount(mountPath, name, readOnly=true)
 
 PARAMETERS:
 
-- **mountPath** (`string`)
-- **name** (`string`)
-- **readOnly** (`bool`)
-  - default value: `true`
+* **mountPath** (`string`)
+* **name** (`string`)
+* **readOnly** (`bool`)
+   - default value: `true`
 
 Mount an existing Kubernetes Secret from the app namespace. Read-only by default.
 
@@ -1063,7 +1064,7 @@ withSecurityContext(ctx)
 
 PARAMETERS:
 
-- **ctx** (`object`)
+* **ctx** (`object`)
 
 Override container security defaults. Each call replaces the previous override object.
 
@@ -1084,14 +1085,14 @@ withServiceMonitor(portName="metrics", path="/metrics", interval="30s", name=nul
 
 PARAMETERS:
 
-- **portName** (`string`)
-  - default value: `"metrics"`
-- **path** (`string`)
-  - default value: `"/metrics"`
-- **interval** (`string`)
-  - default value: `"30s"`
-- **name** (`null`,`string`)
-  - default value: `null`
+* **portName** (`string`)
+   - default value: `"metrics"`
+* **path** (`string`)
+   - default value: `"/metrics"`
+* **interval** (`string`)
+   - default value: `"30s"`
+* **name** (`null`,`string`)
+   - default value: `null`
 
 Create a ServiceMonitor for an ordinary Service port. `portName` must match the final Service port name. Defaults: `metrics`, `/metrics`, `30s`, and a monitor name matching `portName`. Requires a monitoring operator and the ServiceMonitor CRD.
 
@@ -1113,7 +1114,7 @@ withServiceName(name)
 
 PARAMETERS:
 
-- **name** (`string`)
+* **name** (`string`)
 
 Set the StatefulSet `serviceName`. This overrides the generated headless Service reference; it does not rename the ordinary Service or create another Service.
 
@@ -1135,7 +1136,7 @@ withServiceType(type)
 
 PARAMETERS:
 
-- **type** (`string`)
+* **type** (`string`)
 
 Set the ordinary Service type. The default is `ClusterIP`; use `LoadBalancer` for direct network access.
 
@@ -1156,7 +1157,7 @@ withStartupProbe(probe)
 
 PARAMETERS:
 
-- **probe** (`object`)
+* **probe** (`object`)
 
 Set a probe that allows slow startup before liveness and readiness checks begin.
 
@@ -1177,7 +1178,7 @@ withType(type)
 
 PARAMETERS:
 
-- **type** (`string`)
+* **type** (`string`)
 
 Choose `Deployment` (default) or `StatefulSet`. Managed persistent storage requires a StatefulSet.
 
@@ -1198,12 +1199,12 @@ withVolumeMount(mountPath, volumeName, readOnly=false, subPath=null)
 
 PARAMETERS:
 
-- **mountPath** (`string`)
-- **volumeName** (`string`)
-- **readOnly** (`bool`)
-  - default value: `false`
-- **subPath** (`null`,`string`)
-  - default value: `null`
+* **mountPath** (`string`)
+* **volumeName** (`string`)
+* **readOnly** (`bool`)
+   - default value: `false`
+* **subPath** (`null`,`string`)
+   - default value: `null`
 
 Mount a volume created by another helper. `volumeName` must match the
 declared volume or claim template; declaration order does not matter.
