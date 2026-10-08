@@ -3,35 +3,42 @@ local remote = { mode: 'remote', store: 'app-secrets', storeKind: 'ClusterSecret
 local generated = { mode: 'generated', generatorName: 'postgres-password' };
 
 local es = import '../../labsonnet/helpers/externalsecret.libsonnet';
-local infrastructure = cnpg.newCredentialInfrastructure('billing-export', 'ledger', generatorName='billing-generator');
-local customStore = es.newKubernetesReplicationStore('billing-export', 'ledger', serviceAccountName='billing-reader');
-local flow(setup) = {
-  infrastructure: setup,
-  tenant: cnpg.newTenant(
-    'billing',
-    clusterName='db-main',
-    clusterNamespace='ledger',
+local fixedReader = { name: 'shared-reader', namespace: 'readers' };
+local configuredCnpg = cnpg {
+  newCredentialReadGrant(role, serviceAccountName=fixedReader.name, serviceAccountNamespace=fixedReader.namespace)::
+    super.newCredentialReadGrant(role, serviceAccountName, serviceAccountNamespace),
+};
+local flow(name, sourceNamespace, secretName=null) =
+  local setup = cnpg.newCredentialInfrastructure(
+    name + '-export',
+    sourceNamespace,
+    generatorName=name + '-generator',
+    serviceAccountName=fixedReader.name,
+    serviceAccountNamespace=fixedReader.namespace
+  );
+  local tenant = configuredCnpg.newTenant(
+    name,
+    'db-main',
+    sourceNamespace,
     appNamespace='payments',
     credentials=cnpg.generatedCredentials(
       setup.passwordGenerator.metadata.name,
       setup.credentialStore.metadata.name,
-      replicationServiceAccount={ name: setup.credentialReader.metadata.name },
-      replicationNamespace=setup.credentialStore.spec.provider.kubernetes.remoteNamespace
+      replicationNamespace=sourceNamespace
     ),
-    resourceName='billing-owner',
-    secretName='billing-db-auth'
-  ),
-};
+    secretName=secretName
+  );
+  {
+    infrastructure: setup,
+    tenant: tenant,
+  };
 
 {
 
   generated_flows: {
-    defaultReader: flow(infrastructure),
-    customReader: flow({
-      passwordGenerator: es.newPasswordGenerator('billing-generator', 'ledger'),
-      credentialStore: customStore.credentialStore,
-      credentialReader: customStore.credentialReader,
-    }),
+    customSecret: flow('billing', 'ledger', 'billing-db-auth'),
+    defaultSecret: flow('events', 'ledger'),
+    customNamespace: flow('archive', 'archive-db', 'archive-db-auth'),
   },
   remote_key_flow: cnpg.newTenant(
     'billing',
@@ -40,30 +47,39 @@ local flow(setup) = {
     appNamespace='payments',
     credentials=cnpg.remoteCredentials('ops-store', 'billing/password')
   ),
-  grants_unneeded: {
+  ineligible_configured_tenants: {
+    remote: configuredCnpg.newTenant(
+      'billing',
+      'db-main',
+      'ledger',
+      appNamespace='payments',
+      credentials=cnpg.remoteCredentials('ops-store', 'billing/password')
+    ),
+    sameNamespace: configuredCnpg.newTenant(
+      'billing',
+      'db-main',
+      'ledger',
+      appNamespace='ledger',
+      credentials=cnpg.generatedCredentials('billing-generator')
+    ),
+  },
+  generic_tenants: {
     sameNamespace: cnpg.newTenant(
       'billing',
       'db-main',
       'ledger',
       appNamespace='ledger',
-      credentials=cnpg.generatedCredentials('billing-generator', replicationServiceAccount={ name: 'billing-reader' })
+      credentials=cnpg.generatedCredentials('billing-generator')
     ),
-    noReader: cnpg.newTenant(
+    crossNamespace: cnpg.newTenant(
       'billing',
       'db-main',
       'ledger',
       appNamespace='payments',
       credentials=cnpg.generatedCredentials('billing-generator', 'billing-export')
     ),
-    suppressed: cnpg.newTenant(
-      'billing',
-      'db-main',
-      'ledger',
-      appNamespace='payments',
-      credentials=cnpg.generatedCredentials('billing-generator', 'billing-export') + { replicationServiceAccount: null }
-    ),
   },
-  unsafe_empty_grant: es.newSecretReadGrant('billing-owner', 'ledger', [], 'billing-reader'),
+  unsafe_empty_grant: es.newSecretReadGrant('billing-owner', 'ledger', [], fixedReader.name),
   wrong_replication_source: cnpg.newTenant(
     'billing',
     'db-main',
