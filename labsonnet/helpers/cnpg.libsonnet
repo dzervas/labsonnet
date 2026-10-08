@@ -1,4 +1,5 @@
 // Generic CloudNativePG builders using labsonnet's resource helpers.
+local d = import 'github.com/jsonnet-libs/docsonnet/doc-util/main.libsonnet';
 local externalSecret = import './externalsecret.libsonnet';
 local imageVolume = import './imagevolume.libsonnet';
 
@@ -146,6 +147,29 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
   };
 
 {
+  '#':: d.pkg(
+    name='cnpg',
+    url='https://github.com/dzervas/labsonnet',
+    filename=std.thisFile,
+    version='main',
+    help='Build CloudNativePG clusters, databases, roles, and tenant credentials. Requires CloudNativePG and External Secrets Operator CRDs.',
+  ) + d.package.withInstallTemplate('jb install github.com/dzervas/labsonnet/labsonnet@main')
+    + d.package.withUsageTemplate("local cnpg = import 'labsonnet/helpers/cnpg.libsonnet'"),
+
+  '#remoteCredentials':: d.fn(|||
+    Describe credentials that an ExternalSecret reads from a SecretStore. Use this object as the `credentials` value for `newTenant`.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      credentials: cnpg.remoteCredentials('app-secrets', 'catalog-password'),
+    }
+    ```
+  |||, [d.arg('store', d.T.string), d.arg('remoteKey', d.T.string),
+       d.arg('storeKind', d.T.string, 'ClusterSecretStore'),
+       d.argument.fromSchema('property', { type: ['string', 'null'], default: null })]),
   remoteCredentials(store, remoteKey, storeKind='ClusterSecretStore', property=null)::
     assert nonEmptyString(store) : 'labsonnet CNPG: remote credentials require a non-empty store';
     assert nonEmptyString(remoteKey) : 'labsonnet CNPG: remote credentials require a non-empty remoteKey';
@@ -159,6 +183,20 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
       [if property != null then 'property']: property,
     },
 
+  '#generatedCredentials':: d.fn(|||
+    Describe generated credentials for `newTenant`. A replication store is needed when the app Secret lives outside the database namespace.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      credentials: cnpg.generatedCredentials('postgres-password', 'postgres-credentials'),
+    }
+    ```
+  |||, [d.arg('generatorName', d.T.string),
+       d.argument.fromSchema('replicationStore', { type: ['string', 'null'], default: null }),
+       d.arg('replicationStoreKind', d.T.string, 'ClusterSecretStore')]),
   generatedCredentials(generatorName, replicationStore=null, replicationStoreKind='ClusterSecretStore')::
     assert nonEmptyString(generatorName) : 'labsonnet CNPG: generated credentials require a non-empty generatorName';
     assert replicationStore == null || nonEmptyString(replicationStore) : 'labsonnet CNPG: generated credentials replicationStore must be a non-empty string or null';
@@ -172,6 +210,26 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
 
   // Create a CNPG Cluster. Defaults are intentionally small and portable;
   // image and storage class are left to operator/cluster defaults.
+  '#newCluster':: d.fn(|||
+    Start a Cluster builder. Defaults are namespace `default`, one instance, and `5Gi` storage. The image and storage class are left to the operator and cluster defaults. Pods use required anti-affinity across host names by default.
+
+    Add options with `withNamespace`, `withInstances`, `withStorageSize`, `withStorageClass`, `withImage`, `withAffinity`, `withRole`, `withExtension`, `withSharedPreloadLibraries`, or `withClusterSpec`. Tanka finds the Cluster resource inside the builder.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    local affinity = import 'labsonnet/helpers/affinity.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withNamespace('database')
+        + cnpg.withInstances(3)
+        + cnpg.withStorageSize('50Gi')
+        + cnpg.withAffinity(affinity.requireNodeLabel('nodepool', ['database'])),
+    }
+    ```
+  |||, [d.arg('name', d.T.string)]),
   newCluster(name):: {
     _name:: name,
     _namespace:: 'default',
@@ -299,6 +357,26 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
   // Build the shared External Secrets resources used for generated credentials.
   // The replication Store is cluster-scoped and the password generator lives in
   // the source namespace. The reader ServiceAccount namespace is configurable.
+  '#newCredentialInfrastructure':: d.fn(|||
+    Create a Password generator, reader ServiceAccount, and ClusterSecretStore for generated credentials.
+    The generator name defaults to `<name>-password`; the reader ServiceAccount namespace defaults to the `namespace` argument.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      infrastructure: cnpg.newCredentialInfrastructure('postgres-credentials', 'database',
+        generatorName='postgres-password',
+        passwordSpec={ length: 40, allowRepeat: true }),
+    }
+    ```
+  |||, [d.arg('name', d.T.string),
+       d.arg('namespace', d.T.string, 'default'),
+       d.argument.fromSchema('generatorName', { type: ['string', 'null'], default: null }),
+       d.arg('passwordSpec', d.T.object, {}),
+       d.argument.fromSchema('serviceAccountName', { type: ['string', 'null'], default: null }),
+       d.arg('serviceAccountNamespace', d.T.string)]),
   newCredentialInfrastructure(name, namespace='default', generatorName=null, passwordSpec={}, serviceAccountName=null, serviceAccountNamespace=namespace)::
     local actualGeneratorName = if generatorName == null then name + '-password' else generatorName;
     local store = externalSecret.newKubernetesReplicationStore(
@@ -313,43 +391,233 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
       credentialStore: store.credentialStore,
     },
 
+  '#withNamespace':: d.fn(|||
+    Set the Cluster namespace. The default is `default`.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withNamespace('database'),
+    }
+    ```
+  |||, [d.arg('namespace', d.T.string)]),
   withNamespace(namespace):: { _namespace:: namespace },
+  '#withInstances':: d.fn(|||
+    Set the desired number of PostgreSQL instances. The default is `1`.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withInstances(3),
+    }
+    ```
+  |||, [d.arg('instances', d.T.number)]),
   withInstances(instances):: { _instances:: instances },
+  '#withStorageSize':: d.fn(|||
+    Set the requested storage size for each instance. The default is `5Gi`.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withStorageSize('50Gi'),
+    }
+    ```
+  |||, [d.arg('size', d.T.string)]),
   withStorageSize(size):: { _storageSize:: size },
+  '#withStorageClass':: d.fn(|||
+    Set the storage class. It is omitted by default.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withStorageClass('fast'),
+    }
+    ```
+  |||, [d.arg('storageClass', d.T.string)]),
   withStorageClass(storageClass):: { _storageClass:: storageClass },
+  '#withImage':: d.fn(|||
+    Set the PostgreSQL container image. It is omitted by default.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withImage('ghcr.io/example/postgres:18'),
+    }
+    ```
+  |||, [d.arg('image', d.T.string)]),
   withImage(image):: { _image:: image },
   // Accept either a full affinity object with a nodeAffinity field (the shape
   // used by Kubernetes workload helpers) or the nodeAffinity value itself.
+  '#withAffinity':: d.fn(|||
+    Set node affinity. Pass either a node affinity object or an object containing `nodeAffinity`.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    local affinity = import 'labsonnet/helpers/affinity.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withAffinity(affinity.requireNodeLabel('nodepool', ['database'])),
+    }
+    ```
+  |||, [d.arg('affinity', d.T.object)]),
   withAffinity(affinity):: { _affinity:: affinity },
+  '#withRole':: d.fn(|||
+    Add a managed login role backed by the named password Secret.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withRole('app', 'app-postgres'),
+    }
+    ```
+  |||, [d.arg('name', d.T.string), d.arg('secretName', d.T.string)]),
   withRole(name, secretName):: {
     _roles+:: [{ name: name, secretName: secretName }],
   },
   // Mount an extension image volume in the CNPG PostgreSQL container. `image`
   // may be null when the Cluster references an imageCatalogRef.
+  '#withExtension':: d.fn(|||
+    Add a PostgreSQL extension. If `image` is null, the Cluster spec must provide an `imageCatalogRef`.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withExtension('vector', 'ghcr.io/example/vector:1'),
+    }
+    ```
+  |||, [d.arg('name', d.T.string),
+       d.argument.fromSchema('image', { type: ['string', 'null'], default: null }),
+       d.arg('config', d.T.object, {})]),
   withExtension(name, image=null, config={}):: {
     _extensions+:: [{ name: name, image: image, config: config }],
   },
   // Add PostgreSQL libraries that must be loaded at server startup.
+  '#withSharedPreloadLibraries':: d.fn(|||
+    Add PostgreSQL shared preload libraries. Duplicate names are removed.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withSharedPreloadLibraries(['pg_stat_statements']),
+    }
+    ```
+  |||, [d.arg('libraries', d.T.array)]),
   withSharedPreloadLibraries(libraries):: {
     _preloadLibraries+:: assert std.isArray(libraries)
                                 : 'labsonnet CNPG: withSharedPreloadLibraries expects an array'; libraries,
   },
   // Raw CNPG fields deep-merge over generated fields and win on conflicts.
+  '#withClusterSpec':: d.fn(|||
+    Deep-merge extra fields into the Cluster spec. These fields override generated values when they conflict.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      cluster:
+        cnpg.newCluster('postgres')
+        + cnpg.withClusterSpec({ monitoring: { enablePodMonitor: true } }),
+    }
+    ```
+  |||, [d.arg('spec', d.T.object)]),
   withClusterSpec(spec):: {
     _clusterSpecs+:: [assert std.isObject(spec) : 'labsonnet CNPG: withClusterSpec expects an object'; spec],
   },
 
   // Standalone CNPG Database. Set reclaimPolicy=null to omit the field.
+  '#newDatabase':: d.fn(|||
+    Create a Database resource. `ownerName` and `resourceName` default to `name`; `namespace` defaults to `default`; `reclaimPolicy` defaults to `retain`. Set `reclaimPolicy=null` to omit it.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      database: cnpg.newDatabase('catalog', 'postgres', namespace='database'),
+    }
+    ```
+  |||, [d.arg('name', d.T.string), d.arg('clusterName', d.T.string),
+       d.arg('ownerName', d.T.string),
+       d.arg('namespace', d.T.string, 'default'),
+       d.arg('reclaimPolicy', d.T.string, 'retain'),
+       d.arg('spec', d.T.object, {}),
+       d.argument.fromSchema('resourceName', { type: ['string', 'null'], default: null })]),
   newDatabase(name, clusterName, ownerName=name, namespace='default', reclaimPolicy='retain', spec={}, resourceName=null)::
     databaseResource(if resourceName == null then name else resourceName, name, clusterName, ownerName, namespace, reclaimPolicy, spec),
 
   // CNPG 1.30+ standalone DatabaseRole. These resources are namespace-scoped
   // with their Cluster and password Secret.
+  '#newRole':: d.fn(|||
+    Create a DatabaseRole with login enabled and a password Secret reference. Requires CloudNativePG 1.30 or later, which provides the DatabaseRole CRD. `roleName` defaults to `name`; `namespace` defaults to `default`; `reclaimPolicy` defaults to `retain`.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      role: cnpg.newRole('catalog', 'postgres', 'catalog-postgres', namespace='database'),
+    }
+    ```
+  |||, [d.arg('name', d.T.string), d.arg('clusterName', d.T.string),
+       d.arg('secretName', d.T.string), d.arg('namespace', d.T.string, 'default'),
+       d.arg('roleName', d.T.string),
+       d.arg('reclaimPolicy', d.T.string, 'retain'), d.arg('spec', d.T.object, {})]),
   newRole(name, clusterName, secretName, namespace='default', roleName=name, reclaimPolicy='retain', spec={})::
     roleResource(name, clusterName, secretName, namespace, roleName, reclaimPolicy, spec),
 
   // Project wrappers supply the shared reader identity through this helper's
   // default arguments. Generic tenants emit no grant until a reader is supplied.
+  '#newCredentialReadGrant':: d.fn(|||
+    Allow a ServiceAccount to read the password Secret referenced by a DatabaseRole. The ServiceAccount namespace defaults to the role namespace. If `serviceAccountName` is null, return an empty object.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    local role = cnpg.newRole('app', 'postgres', 'app-postgres', namespace='database');
+    {
+      credentialReadGrant: cnpg.newCredentialReadGrant(role, 'app-reader'),
+    }
+    ```
+  |||, [d.arg('role', d.T.object),
+       d.argument.fromSchema('serviceAccountName', { type: ['string', 'null'], default: null }),
+       d.arg('serviceAccountNamespace', d.T.string)]),
   newCredentialReadGrant(role, serviceAccountName=null, serviceAccountNamespace=role.metadata.namespace)::
     if serviceAccountName == null then {}
     else externalSecret.newSecretReadGrant(
@@ -363,6 +631,26 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
   // Emit a tenant's Database, DatabaseRole, and credentials ExternalSecrets.
   // credentials is either {mode:'remote', store, storeKind?, remoteKey, property?}
   // or {mode:'generated', generatorName, generatorKind?, replicationStore?, replicationStoreKind?}.
+  '#newTenant':: d.fn(|||
+    Create a tenant Database, DatabaseRole, and ExternalSecret credentials. Build `credentials` with `remoteCredentials` or `generatedCredentials`, or pass an equivalent object. The application namespace defaults to the tenant name; resource and Secret names default to `<cluster>-<tenant>` and `<tenant>-postgres`. Generated credentials need a replication store when the application and database namespaces differ. Create it with `newCredentialInfrastructure`, then grant its reader access with `newCredentialReadGrant(tenant.role, infrastructure.credentialReader.metadata.name, infrastructure.credentialReader.metadata.namespace)`; the generator and store names must match.
+
+    Example:
+
+    ```jsonnet
+    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+    {
+      tenant: cnpg.newTenant(
+        'catalog', 'postgres', 'database',
+        credentials=cnpg.generatedCredentials('postgres-password', 'postgres-credentials')),
+    }
+    ```
+  |||, [d.arg('name', d.T.string), d.arg('clusterName', d.T.string),
+       d.arg('clusterNamespace', d.T.string), d.arg('appNamespace', d.T.string),
+       d.argument.fromSchema('credentials', { type: ['object', 'null'], default: null }),
+       d.argument.fromSchema('resourceName', { type: ['string', 'null'], default: null }),
+       d.argument.fromSchema('secretName', { type: ['string', 'null'], default: null }),
+       d.arg('databaseSpec', d.T.object, {}),
+       d.arg('roleSpec', d.T.object, {})]),
   newTenant(name, clusterName, clusterNamespace, appNamespace=name, credentials=null, resourceName=null, secretName=null, databaseSpec={}, roleSpec={})::
     assert std.isObject(databaseSpec) && std.isObject(roleSpec) : 'labsonnet CNPG: tenant spec overrides must be objects';
     assert std.all([!std.objectHas(databaseSpec, key) for key in ['name', 'owner', 'cluster']])

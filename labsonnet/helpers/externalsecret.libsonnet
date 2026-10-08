@@ -1,5 +1,7 @@
 // Standalone ExternalSecret and External Secrets credential infrastructure builders.
 
+local d = import 'github.com/jsonnet-libs/docsonnet/doc-util/main.libsonnet';
+
 local externalSecrets = import 'external-secrets.libsonnet';
 local externalSecret = externalSecrets.nogroup.v1.externalSecret;
 local clusterSecretStore = externalSecrets.nogroup.v1.clusterSecretStore;
@@ -20,6 +22,39 @@ local validDnsSubdomain(value) =
   && std.all([validDnsLabel(label) for label in std.split(value, '.')]);
 
 {
+  '#':: d.pkg(
+    name='externalsecret',
+    url='https://github.com/dzervas/labsonnet',
+    filename=std.thisFile,
+    version='main',
+    help='Build ExternalSecret, password generator, Kubernetes replication store, and narrow Secret read access resources. Requires the External Secrets Operator CRDs.',
+  ) + d.package.withInstallTemplate('jb install github.com/dzervas/labsonnet/labsonnet@main')
+    + d.package.withUsageTemplate("local externalsecret = import 'labsonnet/helpers/externalsecret.libsonnet'"),
+
+  '#new':: d.fn(|||
+    Create an ExternalSecret. `dataFrom` and `data` are omitted when empty. Store and refresh or target policies are omitted when null.
+
+    Example:
+
+    ```jsonnet
+    local e = import 'labsonnet/helpers/externalsecret.libsonnet';
+    {
+      secret: e.new('api-token', 'apps', 'app-secrets',
+        dataFrom=[{ extract: { key: 'api-token' } }]),
+    }
+    ```
+  |||, [
+    d.arg('name', d.T.string),
+    d.arg('namespace', d.T.string),
+    d.argument.fromSchema('storeName', { type: ['string', 'null'], default: null }),
+    d.arg('storeKind', d.T.string, 'ClusterSecretStore'),
+    d.arg('dataFrom', d.T.array, []),
+    d.arg('data', d.T.array, []),
+    d.argument.fromSchema('refreshInterval', { type: ['string', 'null'], default: null }),
+    d.argument.fromSchema('refreshPolicy', { type: ['string', 'null'], default: null }),
+    d.argument.fromSchema('creationPolicy', { type: ['string', 'null'], default: null }),
+    d.argument.fromSchema('deletionPolicy', { type: ['string', 'null'], default: null }),
+  ]),
   new(name, namespace, storeName=null, storeKind='ClusterSecretStore', dataFrom=[], data=[], refreshInterval=null, refreshPolicy=null, creationPolicy=null, deletionPolicy=null)::
     externalSecret.new(name)
     + externalSecret.metadata.withNamespace(namespace)
@@ -35,6 +70,22 @@ local validDnsSubdomain(value) =
     + (if deletionPolicy != null then externalSecret.spec.target.withDeletionPolicy(deletionPolicy) else {}),
 
   // Create a namespaced Password generator. The caller owns its password policy.
+  '#newPasswordGenerator':: d.fn(|||
+    Create an External Secrets Password generator in a namespace. Pass the generator's policy in `spec`.
+
+    Example:
+
+    ```jsonnet
+    local e = import 'labsonnet/helpers/externalsecret.libsonnet';
+    {
+      passwordGenerator: e.newPasswordGenerator('app-password', 'apps', { length: 40, allowRepeat: true }),
+    }
+    ```
+  |||, [
+    d.arg('name', d.T.string),
+    d.arg('namespace', d.T.string),
+    d.arg('spec', d.T.object, {}),
+  ]),
   newPasswordGenerator(name, namespace, spec={})::
     assert validDnsSubdomain(name) : 'labsonnet ExternalSecret: Password generator name must be a valid DNS subdomain';
     assert validDnsLabel(namespace) : 'labsonnet ExternalSecret: Password generator namespace must be a valid DNS label';
@@ -48,6 +99,24 @@ local validDnsSubdomain(value) =
 
   // Create the ServiceAccount and ClusterSecretStore used to replicate secrets
   // from one namespace. The matching Role grants are intentionally separate.
+  '#newKubernetesReplicationStore':: d.fn(|||
+    Create a reader ServiceAccount and a ClusterSecretStore that reads Secrets from `namespace`. Add a separate Role and RoleBinding to grant access to specific Secrets.
+    The reader name defaults to `name`; the reader namespace defaults to the source `namespace`.
+
+    Example:
+
+    ```jsonnet
+    local e = import 'labsonnet/helpers/externalsecret.libsonnet';
+    {
+      replicationStore: e.newKubernetesReplicationStore('app-credentials', 'database'),
+    }
+    ```
+  |||, [
+    d.arg('name', d.T.string),
+    d.arg('namespace', d.T.string),
+    d.argument.fromSchema('serviceAccountName', { type: ['string', 'null'], default: null }),
+    d.arg('serviceAccountNamespace', d.T.string),
+  ]),
   newKubernetesReplicationStore(name, namespace, serviceAccountName=null, serviceAccountNamespace=namespace)::
     local readerName = if serviceAccountName == null then name else serviceAccountName;
     assert validDnsSubdomain(name) : 'labsonnet ExternalSecret: replication store name must be a valid DNS subdomain';
@@ -88,6 +157,26 @@ local validDnsSubdomain(value) =
 
   // Grant one ServiceAccount read access to an explicit set of Secrets in a
   // namespace. Empty resourceNames would mean unrestricted access, so reject it.
+  '#newSecretReadGrant':: d.fn(|||
+    Grant a ServiceAccount `get` access to the named Secrets in one namespace. At least one Secret name is required.
+    The ServiceAccount namespace defaults to the Secret namespace.
+
+    Example:
+
+    ```jsonnet
+    local e = import 'labsonnet/helpers/externalsecret.libsonnet';
+    {
+      secretReadGrant: e.newSecretReadGrant('api-credentials', 'database', ['api-postgres'],
+        'api-reader'),
+    }
+    ```
+  |||, [
+    d.arg('name', d.T.string),
+    d.arg('namespace', d.T.string),
+    d.arg('secretNames', d.T.array),
+    d.arg('serviceAccountName', d.T.string),
+    d.arg('serviceAccountNamespace', d.T.string),
+  ]),
   newSecretReadGrant(name, namespace, secretNames, serviceAccountName, serviceAccountNamespace=namespace)::
     assert validDnsSubdomain(name) : 'labsonnet ExternalSecret: secret read grant name must be a valid DNS subdomain';
     assert validDnsLabel(namespace) : 'labsonnet ExternalSecret: secret read grant namespace must be a valid DNS label';
@@ -123,6 +212,21 @@ local validDnsSubdomain(value) =
       },
     },
 
+  '#withSecretLabels':: d.fn(|||
+    Return a patch that sets labels on an ExternalSecret's target Secret template.
+
+    Example:
+
+    ```jsonnet
+    local e = import 'labsonnet/helpers/externalsecret.libsonnet';
+    {
+      secret: std.mergePatch(
+        e.new('api-token', 'apps', 'app-secrets'),
+        e.withSecretLabels({ app: 'api' })
+      ),
+    }
+    ```
+  |||, [d.arg('labels', d.T.object)]),
   withSecretLabels(labels)::
     externalSecret.spec.target.template.metadata.withLabels(labels),
 }

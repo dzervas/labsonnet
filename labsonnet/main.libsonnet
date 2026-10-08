@@ -85,60 +85,180 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
 
 {
   '#':: d.pkg(
-    name='labsonnet',
-    url='https://github.com/dzervas/labsonnet',
-    help=|||
-      Commonly used components to define a Kubernetes workload, mainly from a bare docker image
+          name='labsonnet',
+          url='https://github.com/dzervas/labsonnet',
+          help=|||
+            Build Kubernetes workloads for Tanka from container images. Add settings with `+`.
 
-      ### Lazy configuration callbacks
+            ## Tanka setup
 
-      Pass a function when your config needs the app's final name or namespace:
+            In your Tanka project, install the library:
 
-      ```jsonnet
-      local lab = import 'main.libsonnet';
-      lab.new('worker', 'example:1')
-      + lab.withEnv(function(ctx) {
-        APP_NAME: ctx.name,
-        APP_NAMESPACE: ctx.namespace,
-      })
-      + lab.withNamespace('apps')  // The callback sees 'apps'.
-      ```
+            ```bash
+            jb install github.com/dzervas/labsonnet/labsonnet@main
+            ```
 
-      The context contains only these fields:
+            Create these one-line import files under `lib/`:
 
-      | Field | Value |
-      | --- | --- |
-      | `name` | App/workload name passed to `new`; unaffected by `withServiceName`. |
-      | `namespace` | Final namespace, defaulting to the app name. `withNamespace` can appear before or after the helper. |
+            | File                             | Contents                                                                                 |
+            | -------------------------------- | ---------------------------------------------------------------------------------------- |
+            | `lib/k.libsonnet`                | `import 'github.com/jsonnet-libs/k8s-libsonnet/1.33/main.libsonnet'`                     |
+            | `lib/gateway-api.libsonnet`      | `import 'github.com/jsonnet-libs/gateway-api-libsonnet/1.1-experimental/main.libsonnet'` |
+            | `lib/external-secrets.libsonnet` | `import 'github.com/jsonnet-libs/external-secrets-libsonnet/1.0/main.libsonnet'`         |
 
-      Supported by `withPort`, `withHeadlessPort`, `withEnv`, `withFieldRefEnv`,
-      and `withSecretEnv`, plus `withPV`'s `pvConfig` and `withClaimTemplate`'s
-      `config`. Other helper arguments keep their existing APIs.
+            Use versions available in your `vendor/` directory. Tanka includes `lib/` and
+            `vendor/` in its import paths, so the library can use these short aliases.
 
-      - Return an object with the usual helper schema. Other return types are rejected; nested callbacks are not evaluated.
-      - Evaluation happens when needed, before validation and rendering. Helpers can be reused across apps.
-      - Keep callbacks pure. Use `ctx` and captured inputs; reading the app being built can cause a cycle. Do not rely on how many times a callback runs.
-      - Existing objects, merge order, port deduplication, and storage conflict checks work as before.
+            ## Quick start
 
-      Callbacks can derive names, references, or settings anywhere in the returned
-      object, including nested route and storage configuration.
-    |||,
-    filename=std.thisFile,
-    version='main'
-  ),
+            Add this to `environments/dashboard/main.jsonnet` in a configured Tanka environment:
+
+            ```jsonnet
+            local lab = import 'labsonnet/main.libsonnet';
+            {
+              dashboard:
+                lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+                + lab.withNamespace('apps')
+                + lab.withCreateNamespace()
+                + lab.withPort({ port: 8080, name: 'http' })
+                + lab.withEnv({ TZ: 'Europe/Athens' }),
+            }
+            ```
+
+            Preview, compare, and apply from the project root:
+
+            ```bash
+            tk show environments/dashboard
+            tk diff environments/dashboard
+            tk apply environments/dashboard
+            ```
+
+            Each app groups resources under `workload`, `service`, `headlessService`,
+            `namespace`, `routing`, `pvc`, `externalSecrets`, and `monitors`.
+            Tanka finds the Kubernetes resources in these nested objects. Unused groups
+            may be empty or null. Select `.workload` if you only need the workload resource.
+
+            Defaults: Deployment, one replica, ClusterIP Service, and namespace equal to
+            the app name. The namespace is not created unless you call `withCreateNamespace()`.
+            At least one port is required. Containers run as UID/GID 1000, without privilege
+            escalation, and with all capabilities dropped. Choose an image that supports this
+            or set the security context explicitly.
+
+            Examples below use `lab` from the import above. Settings such as replica counts
+            use the last value; ports, mounts, containers, and environment entries accumulate. For maps,
+            later values replace matching keys.
+            Replace example image references with images you use.
+
+            ## Routes, secrets, and storage
+
+            ```jsonnet
+            local lab = import 'labsonnet/main.libsonnet';
+            {
+              photos:
+                lab.new('photos', 'ghcr.io/example/photos:1.0')
+                + lab.withNamespace('apps')
+                + lab.withType('StatefulSet')
+                + lab.withPort({
+                  port: 8080,
+                  name: 'http',
+                  httpRoute: {
+                    fqdn: 'photos.example.com',
+                    gateway: { name: 'edge', namespace: 'network', sectionName: 'https' },
+                  },
+                })
+                + lab.withPV('/data', { size: '10Gi', storageClassName: 'fast' })
+                + lab.withExternalSecretEnvs('photos-login', { API_TOKEN: 'token' }, {
+                  store: 'password-store', remoteKey: 'photos', refreshPolicy: 'CreatedOnce',
+                })
+                + lab.withPort({ port: 9090, name: 'metrics' })
+                + lab.withServiceMonitor(),
+            }
+            ```
+
+            The Gateway, storage class, and secret store must already exist. Routes, external
+            secrets, and monitors need their matching controllers and CRDs.
+
+            ## Choosing a volume
+
+            | Need                                         | Use                                                                                        |
+            | -------------------------------------------- | ------------------------------------------------------------------------------------------ |
+            | New persistent storage for a StatefulSet     | [`withPV`](#fn-withpv)                                                                     |
+            | One StatefulSet PVC mounted at several paths | [`withClaimTemplate`](#fn-withclaimtemplate) + [`withVolumeMount`](#fn-withvolumemount)    |
+            | An existing PVC                              | [`withExistingPVC`](#fn-withexistingpvc) + [`withVolumeMount`](#fn-withvolumemount)        |
+            | Temporary files                              | [`withEmptyDir`](#fn-withemptydir)                                                         |
+            | An existing ConfigMap or Secret              | [`withConfigMapMount`](#fn-withconfigmapmount) or [`withSecretMount`](#fn-withsecretmount) |
+            | Files from an OCI image                      | [`withImageVolume`](#fn-withimagevolume) + [`withVolumeMount`](#fn-withvolumemount)        |
+            | Files from a secret store                    | [`withExternalSecretMount`](#fn-withexternalsecretmount)                                   |
+
+            A volume provides storage; a mount chooses where it appears in the container.
+            Each mount path must be unique. A volume can have multiple mounts. Repeating
+            a volume definition is allowed only when the definitions match.
+
+            ## Reusable defaults
+
+            See [downstream helpers and overrides](downstream.md) for re-exporting
+            helpers, setting local defaults, and adding checks after composition.
+
+            Wrap the library to share placement or monitoring settings between apps:
+
+            ```jsonnet
+            local lab = import 'labsonnet/main.libsonnet';
+            local affinity = import 'labsonnet/helpers/affinity.libsonnet';
+            local site = lab {
+              new(name, image)::
+                super.new(name, image)
+                + lab.withAffinity(affinity.requireNodeLabel('pool', ['apps'])),
+              withMetrics(port=9090)::
+                lab.withPort({ port: port, name: 'metrics' }) + lab.withServiceMonitor(),
+            };
+            {
+              dashboard:
+                site.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+                + site.withPort({ port: 8080 })
+                + site.withMetrics(),
+            }
+            ```
+
+            ## Lazy configuration callbacks
+
+            Use a callback when a setting needs the final app name or namespace:
+
+            ```jsonnet
+            local lab = import 'labsonnet/main.libsonnet';
+            {
+              worker:
+                lab.new('worker', 'ghcr.io/example/worker:1.0')
+                + lab.withPort({ port: 8080 })
+                + lab.withEnv(function(ctx) { APP_NAME: ctx.name, APP_NAMESPACE: ctx.namespace })
+                + lab.withNamespace('apps'),
+            }
+            ```
+
+            `ctx` contains only `name` and `namespace`. The namespace defaults to the app
+            name; callbacks see later `withNamespace` calls too. `withServiceName` does not
+            change `ctx.name`.
+
+            Supported by `withPort`, `withHeadlessPort`, `withEnv`, `withFieldRefEnv`,
+            `withSecretEnv`, `withPV`'s `pvConfig`, and `withClaimTemplate`'s `config`.
+            Return an object with the normal helper fields. Nested callbacks are not
+            resolved. Keep callbacks pure and use `ctx` or captured values; reading the app
+            being built can cause a cycle.
+          |||,
+          filename=std.thisFile,
+          version='main'
+        ) + d.package.withInstallTemplate('jb install github.com/dzervas/labsonnet/labsonnet@main')
+        + d.package.withUsageTemplate("local labsonnet = import 'labsonnet/main.libsonnet'"),
 
   '#new':: d.fn(
     help=|||
-      Main entrypoint for labsonnet, defines a new "app".
-      The `name` is used for most of the resources, namespace, service name, etc.
-
-      The rest of the functions work on top of this to alter various aspects of the app.
-
-      Example:
+      Create an app. Add at least one port before rendering. The name also sets the default namespace and Service name.
 
       ```jsonnet
-      labsonnet.new('hello-world', 'nginx:latest')
-      + labsonnet.withEnv({ MY_VAR: 'my-value' })
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 }),
+      }
       ```
     |||,
     args=[
@@ -498,69 +618,214 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   // --- Scalar overrides (last writer wins) ---
 
   '#withFqdn':: d.fn(
-    help='Set the FQDN for the app',
+    help=|||
+      Set the default hostname for HTTP, gRPC, and Ingress routes. A route can override it with its own `fqdn`.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withFqdn('dashboard.example.com'),
+      }
+      ```
+    |||,
     args=[d.arg('fqdn', d.T.string)],
   ),
   withFqdn(fqdn):: { _fqdn:: fqdn },
   '#withType':: d.fn(
-    help='Set the workload type of the app (Deployment or StatefulSet)',
+    help=|||
+      Choose `Deployment` (default) or `StatefulSet`. Managed persistent storage requires a StatefulSet.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withType('StatefulSet'),
+      }
+      ```
+    |||,
     args=[d.arg('type', d.T.string)],
   ),
   withType(type):: { _type:: type },
   '#withReplicas':: d.fn(
-    help='Set the number of replicas for the app (a non-negative integer)',
+    help=|||
+      Set the replica count, a non-negative integer. The default is 1.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withReplicas(2),
+      }
+      ```
+    |||,
     args=[d.arg('replicas', d.T.number)],
   ),
   withReplicas(n):: { _replicas:: n },
   '#withCommand':: d.fn(
-    help='Set the command for the app',
+    help=|||
+      Set the container entrypoint as an array of strings.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withCommand(['/app/server']),
+      }
+      ```
+    |||,
     args=[d.arg('command', d.T.array)],
   ),
   withCommand(cmd):: { _command:: cmd },
   '#withArgs':: d.fn(
-    help='Set the arguments for the app',
+    help=|||
+      Set arguments passed to the container entrypoint.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withArgs(['--listen', ':8080']),
+      }
+      ```
+    |||,
     args=[d.arg('args', d.T.array)],
   ),
   withArgs(args):: { _args:: args },
   '#withContainer':: d.fn(
-    help='Add an additional container to the app - pass a standard k.core.v1.container object',
+    help=|||
+      Add a sidecar container using a Kubernetes container object. It inherits the main container's environment, mounts, and security settings.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withContainer({ name: 'worker', image: 'ghcr.io/example/worker:1.0' }),
+      }
+      ```
+    |||,
     args=[d.arg('container', d.T.object)],
   ),
   withContainer(container):: { _containers+:: [container] },
   '#withInitContainer':: d.fn(
-    help='Add an init container to the app - pass a standard k.core.v1.container object',
+    help=|||
+      Add a container that runs before the app starts. It inherits the main container's environment, mounts, and security settings.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withInitContainer({ name: 'prepare', image: 'busybox:1.37', command: ['sh', '-c', 'echo ready'] }),
+      }
+      ```
+    |||,
     args=[d.arg('container', d.T.object)],
   ),
   withInitContainer(container):: { _initContainers+:: [container] },
   '#withRunAsUser':: d.fn(
-    help='Set the UID & GID for the app',
+    help=|||
+      Set the container UID and GID, plus the default pod `fsGroup`. The default is 1000.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withRunAsUser(65532),
+      }
+      ```
+    |||,
     args=[d.arg('uid', d.T.number)],
   ),
   withRunAsUser(uid):: { _runAsUser:: uid },
   '#withAffinity':: d.fn(
-    help='Set workload affinity with nodeAffinity, podAffinity, or podAntiAffinity object fields (see helpers/affinity.libsonnet)',
+    help=|||
+      Set pod placement rules. Use the affinity helper to build them; pass `null` or `{}` to remove placement rules.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withAffinity((import 'labsonnet/helpers/affinity.libsonnet').requireNodeLabel('pool', ['apps'])),
+      }
+      ```
+    |||,
     args=[d.arg('affinity', 'object | null')],
   ),
   withAffinity(aff):: { _affinity:: aff },
   '#withServiceType':: d.fn(
-    help='Set the service type for the app (ClusterIP, NodePort, LoadBalancer, ExternalName)',
+    help=|||
+      Set the ordinary Service type. The default is `ClusterIP`; use `LoadBalancer` for direct network access.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withServiceType('LoadBalancer'),
+      }
+      ```
+    |||,
     args=[d.arg('type', d.T.string)],
   ),
   withServiceType(t):: { _serviceType:: t },
   '#withCreateNamespace':: d.fn(
-    help='Set whether to create the namespace',
+    help=|||
+      Create the app namespace when true. Namespace creation is disabled by default.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withCreateNamespace(),
+      }
+      ```
+    |||,
     args=[d.arg('create', d.T.boolean, true)],
   ),
   withCreateNamespace(create=true):: { _createNamespace:: create },
   '#withNamespace':: d.fn(
-    help='Set the namespace for the app',
+    help=|||
+      Set the namespace for the app and its namespaced resources. The default is the app name.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withNamespace('apps'),
+      }
+      ```
+    |||,
     args=[d.arg('ns', d.T.string)],
   ),
   withNamespace(ns):: { _namespace:: ns },
   '#withHeadlessService':: d.fn(
-    help='Create a headless Service for a Deployment or StatefulSet, optionally setting its name and publishing not-ready addresses. The name defaults to `<workload>-headless` and supplies StatefulSet serviceName unless overridden.',
+    help=|||
+      Create a headless Service for peer discovery. Its name defaults to `<app>-headless`; it also supplies the StatefulSet `serviceName`. Not-ready addresses are published by default. Add ports with `withHeadlessPort`.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withType('StatefulSet')
+          + lab.withHeadlessService(publishNotReadyAddresses=false)
+          + lab.withHeadlessPort({ port: 7000, name: 'peer' }),
+      }
+      ```
+    |||,
     args=[
-      d.arg('name', d.T.string, null),
+      d.argument.fromSchema('name', { type: ['string', 'null'], default: null }),
       d.arg('publishNotReadyAddresses', d.T.boolean, true),
     ],
   ),
@@ -570,47 +835,137 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
     _headlessPublishNotReady:: if std.isBoolean(name) then name else publishNotReadyAddresses,
   },
   '#withServiceName':: d.fn(
-    help='Override the StatefulSet serviceName, taking precedence over the headless Service name.',
+    help=|||
+      Set the StatefulSet `serviceName`. This overrides the generated headless Service reference; it does not rename the ordinary Service or create another Service.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withType('StatefulSet')
+          + lab.withServiceName('existing-peers'),
+      }
+      ```
+    |||,
     args=[d.arg('name', d.T.string)],
   ),
   withServiceName(name):: { _serviceName:: name },
   '#withPodManagementPolicy':: d.fn(
-    help='Set the pod management policy for the app',
+    help=|||
+      Set the StatefulSet pod management policy to `OrderedReady` or `Parallel`.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withType('StatefulSet')
+          + lab.withPodManagementPolicy('Parallel'),
+      }
+      ```
+    |||,
     args=[d.arg('policy', d.T.string)],
   ),
   withPodManagementPolicy(policy):: { _podManagementPolicy:: policy },
 
   '#withResources':: d.fn(
-    help='Set the resource requirements for the app - `{ requests: { cpu, memory }, limits: { cpu, memory } }`',
+    help=|||
+      Set CPU and memory requests and limits using a Kubernetes resources object.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withResources({ requests: { cpu: '100m', memory: '128Mi' }, limits: { memory: '512Mi' } }),
+      }
+      ```
+    |||,
     args=[d.arg('resources', d.T.object)],
   ),
   withResources(resources):: { _resources:: resources },
 
   '#withLivenessProbe':: d.fn(
-    help="Set the liveness probe for the app - e.g. `{ httpGet: { path: '/healthz', port: 8080 }, initialDelaySeconds: 10, periodSeconds: 30 }`",
+    help=|||
+      Set a probe that restarts an unhealthy container.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withLivenessProbe({ httpGet: { path: '/healthz', port: 8080 }, periodSeconds: 30 }),
+      }
+      ```
+    |||,
     args=[d.arg('probe', d.T.object)],
   ),
   withLivenessProbe(probe):: { _livenessProbe:: probe },
   '#withReadinessProbe':: d.fn(
-    help="Set the readiness probe for the app - e.g. `{ httpGet: { path: '/readyz', port: 8080 }, initialDelaySeconds: 10, periodSeconds: 30 }`",
+    help=|||
+      Set a probe that controls when the pod receives Service traffic.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withReadinessProbe({ httpGet: { path: '/readyz', port: 8080 } }),
+      }
+      ```
+    |||,
     args=[d.arg('probe', d.T.object)],
   ),
   withReadinessProbe(probe):: { _readinessProbe:: probe },
   '#withStartupProbe':: d.fn(
-    help="Set the startup probe for the app - e.g. `{ httpGet: { path: '/startupz', port: 8080 }, initialDelaySeconds: 10, periodSeconds: 30 }`",
+    help=|||
+      Set a probe that allows slow startup before liveness and readiness checks begin.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withStartupProbe({ httpGet: { path: '/healthz', port: 8080 }, failureThreshold: 30, periodSeconds: 10 }),
+      }
+      ```
+    |||,
     args=[d.arg('probe', d.T.object)],
   ),
   withStartupProbe(probe):: { _startupProbe:: probe },
 
   // Security context overrides (merged with defaults)
   '#withSecurityContext':: d.fn(
-    help='Set the security context for the app - runAsNonRoot, runAsUser, capabilities, etc.',
+    help=|||
+      Override container security defaults. Each call replaces the previous override object.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withSecurityContext({ readOnlyRootFilesystem: true }),
+      }
+      ```
+    |||,
     args=[d.arg('ctx', d.T.object)],
   ),
   withSecurityContext(ctx):: { _securityContext:: ctx },
   // Pod-level: overrides fsGroup, runAsNonRoot, supplementalGroups, etc.
   '#withPodSecurityContext':: d.fn(
-    help='Set pod-level security context overrides. Top-level fields set to null are omitted from the final context, so use values such as { fsGroup: null, fsGroupChangePolicy: null } to remove those defaults. As with other scalar hidden fields, the last withPodSecurityContext() call supplies the overrides.',
+    help=|||
+      Override pod security defaults. Top-level null values remove fields. Each call replaces the previous override object.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withPodSecurityContext({ fsGroup: null, fsGroupChangePolicy: null }),
+      }
+      ```
+    |||,
     args=[d.arg('ctx', d.T.object)],
   ),
   withPodSecurityContext(ctx):: { _podSecurityContext:: ctx },
@@ -618,18 +973,76 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   // --- Merge/append accumulators ---
 
   '#withPort':: d.fn(
-    help='Add a container port exposed on the ordinary Service. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above. Routing configs accept `name` to override the resource name while keeping output keys based on port names.',
+    help=|||
+      Expose a container port through the app's Service.
+
+      | Field      | Meaning                                                                          |
+      | ---------- | -------------------------------------------------------------------------------- |
+      | `port`     | Required port number.                                                            |
+      | `name`     | Optional Service port name; defaults to `<protocol>-<port>`, such as `tcp-8080`. |
+      | `protocol` | Defaults to `TCP`; use `UDP` for a UDP port.                                     |
+
+      For a route, add one of `httpRoute`, `grpcRoute`, `tcpRoute`, `udpRoute`, or
+      `ingress`. HTTP, gRPC, and Ingress need a hostname (`fqdn` in the route or
+      `withFqdn`). Routes select TCP, except `udpRoute`, which selects UDP.
+
+      See the [routing example](#routes-secrets-and-storage) and the
+      [Gateway](helpers/gateway.md) or [Ingress](helpers/ingress.md) options.
+      `name` inside a route config overrides the resource name.
+
+      Repeated number/protocol pairs keep the first Service port. Use different
+      port names to attach several routes to one port. Accepts an object or callback.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080, name: 'http' }),
+      }
+      ```
+    |||,
     args=[d.arg('portEntry', 'object | function(ctx) object')],
   ),
   withPort(portEntry):: addPort(portEntry, false),
   '#withHeadlessPort':: d.fn(
-    help='Add a container port exposed on the headless Service. Use withHeadlessService() to enable headless Service generation. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.',
+    help=|||
+      Expose a port through the headless Service for peer discovery. Enable it
+      with `withHeadlessService()`. Uses the same fields as `withPort` and accepts
+      an object or callback.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withHeadlessService()
+          + lab.withHeadlessPort({ port: 7000, name: 'peer' }),
+      }
+      ```
+    |||,
     args=[d.arg('portEntry', 'object | function(ctx) object')],
   ),
   withHeadlessPort(portEntry):: addPort(portEntry, true),
   '#withPV':: d.fn(
     help=|||
-      Convenience wrapper over storage declaration and withVolumeMount, declaring managed storage and mounting it in one call. pvConfig accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above. pvConfig supports name, size, accessModes, storageClassName, readOnly (default false), subPath (default null), and emptyDir. Persistent storage requires StatefulSet. Names default to `<workload>-<mount-path-with-dashes>`; storage defaults are ReadWriteOnce and no explicit storage class. Each mount path may be declared only once across all mount APIs, including identical repeats. Use withVolumeMount at another path to mount its named volume again.
+      Create a PVC and mount it in one call. Requires a StatefulSet and `size`.
+
+      Set `storageClassName` to choose a storage class; otherwise Kubernetes uses
+      its default. Optional fields: `name`, `accessModes` (default
+      `['ReadWriteOnce']`), `readOnly`, and `subPath` (see `withVolumeMount`).
+      Accepts an object or callback.
+
+      For another mount of this volume, give it a `name` and use `withVolumeMount`.
+      For temporary storage, use `withEmptyDir` (or `emptyDir: true`).
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withType('StatefulSet')
+          + lab.withPV('/data', { name: 'data', size: '10Gi', storageClassName: 'fast' }),
+      }
+      ```
     |||,
     args=[
       d.arg('mountPath', d.T.string),
@@ -655,7 +1068,8 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
       subPath=if std.objectHas(pv, 'subPath') then pv.subPath else null
     ),
     _claimTemplates+:: if emptyDir then [] else [
-      entry { mountPath: mountPath } for entry in declaration._claimTemplates
+      entry { mountPath: mountPath }
+      for entry in declaration._claimTemplates
     ],
     _volumes+:: if emptyDir then declaration._volumes else [],
     _volumeMounts+:: mount._volumeMounts,
@@ -663,15 +1077,21 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   },
   '#withClaimTemplate':: d.fn(
     help=|||
-      Declare managed StatefulSet storage without mounting it. config accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above. config accepts size (required), accessModes (default ['ReadWriteOnce']), and storageClassName (default null). The name is the claim-template and volume name and must be a Kubernetes volume name. Repeated equal definitions deduplicate; conflicting definitions fail. Templates declared here render in alphabetical name order; withPV templates retain alphabetical mount-path order. Mount it with withVolumeMount. Declarations and references resolve against the final composed configuration, so their order does not matter.
+      Create a StatefulSet PVC by volume name, then mount it separately.
+      Use this when one PVC needs several mounts. `config` accepts `size`
+      (required), `accessModes`, and `storageClassName`, as in `withPV`.
+      Accepts an object or callback.
 
       ```jsonnet
-      labsonnet.new('probe', 'example:1')
-      + labsonnet.withType('StatefulSet')
-      + labsonnet.withPort({ port: 8080 })
-      + labsonnet.withClaimTemplate('state', { size: '2Gi', storageClassName: 'fast' })
-      + labsonnet.withVolumeMount('/config', 'state', subPath='config')
-      + labsonnet.withVolumeMount('/data', 'state', subPath='data')
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withType('StatefulSet')
+          + lab.withClaimTemplate('data', { size: '10Gi', storageClassName: 'fast' })
+          + lab.withVolumeMount('/config', 'data', subPath='config')
+          + lab.withVolumeMount('/data', 'data', subPath='data'),
+      }
       ```
     |||,
     args=[d.arg('name', d.T.string), d.arg('config', 'object | function(ctx) object')],
@@ -682,14 +1102,18 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   },
   '#withExistingPVC':: d.fn(
     help=|||
-      Declare a volume referencing an existing PVC in the workload namespace, without creating or managing that claim. Works with Deployment and StatefulSet. volumeName must be a Kubernetes volume name; claimName is independent and may be a longer or dotted PVC name. Repeated equal definitions deduplicate; conflicting definitions fail. This API does not add a mount.
+      Use a PVC that already exists in the app namespace. `volumeName` names
+      the volume in the pod; `claimName` identifies the existing PVC. Add mounts
+      with `withVolumeMount`. Works with Deployment and StatefulSet.
 
       ```jsonnet
-      labsonnet.new('reader', 'example:1')
-      + labsonnet.withPort({ port: 8080 })
-      + labsonnet.withExistingPVC('media', 'shared-media')
-      + labsonnet.withVolumeMount('/movies', 'media', readOnly=true, subPath='movies')
-      + labsonnet.withVolumeMount('/series', 'media', readOnly=true, subPath='series')
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withExistingPVC('media', 'shared-media')
+          + lab.withVolumeMount('/movies', 'media', readOnly=true, subPath='movies'),
+      }
       ```
     |||,
     args=[d.arg('volumeName', d.T.string), d.arg('claimName', d.T.string)],
@@ -697,22 +1121,53 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   withExistingPVC(volumeName, claimName)::
     declareVolume(k.core.v1.volume.fromPersistentVolumeClaim(volumeName, claimName)),
   '#withImageVolume':: d.fn(
-    help='Declare an image volume. Mount it separately with withVolumeMount(..., readOnly=true).',
+    help=|||
+      Use files from an OCI image. Add a mount with `readOnly=true`.
+      Requires cluster support for image volumes. Optional `pullPolicy`:
+      `Always`, `IfNotPresent`, or `Never`; null leaves it to Kubernetes.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withImageVolume('assets', 'ghcr.io/example/assets:1.0')
+          + lab.withVolumeMount('/assets', 'assets', readOnly=true),
+      }
+      ```
+    |||,
     args=[
       d.arg('name', d.T.string),
       d.arg('image', d.T.string),
-      d.arg('pullPolicy', d.T.string, null),
+      d.argument.fromSchema('pullPolicy', { type: ['string', 'null'], default: null }),
     ],
   ),
   withImageVolume(name, image, pullPolicy=null)::
     declareVolume(imageVolumeHelper.new(name, image, pullPolicy)),
   '#withVolumeMount':: d.fn(
-    help='Mount a declared volume or claim template. References resolve after composition, so declarations can appear before or after mounts. Also accepts volume names supplied by withPV, withEmptyDir, withSecretMount, withConfigMapMount, withExternalSecretMount, or withImageVolume. Each mount has independent readOnly and subPath; image volume mounts require readOnly=true; null subPath omits the field. Different paths accumulate. Each mount path may be declared only once across all mount APIs, including identical repeats. Unknown references and conflicting volume definitions fail.',
+    help=|||
+      Mount a volume created by another helper. `volumeName` must match the
+      declared volume or claim template; declaration order does not matter.
+
+      `readOnly` defaults to false. `subPath` selects a file or folder inside the volume;
+      null mounts the whole volume. Image volumes require `readOnly=true`.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withExistingPVC('media', 'shared-media')
+          + lab.withVolumeMount('/movies', 'media', readOnly=true, subPath='movies')
+          + lab.withVolumeMount('/series', 'media', readOnly=true, subPath='series'),
+      }
+      ```
+    |||,
     args=[
       d.arg('mountPath', d.T.string),
       d.arg('volumeName', d.T.string),
       d.arg('readOnly', d.T.boolean, false),
-      d.arg('subPath', d.T.string, null),
+      d.argument.fromSchema('subPath', { type: ['string', 'null'], default: null }),
     ],
   ),
   withVolumeMount(mountPath, volumeName, readOnly=false, subPath=null):: {
@@ -720,12 +1175,34 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
     _mountPaths+:: [mountPath],
   },
   '#withEmptyDir':: d.fn(
-    help='Add an emptyDir volume mount to the app. Duplicate mount paths across all mount APIs fail, including identical repeats.',
+    help=|||
+      Mount temporary storage. Data lasts only for the lifetime of the pod.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withEmptyDir('/tmp'),
+      }
+      ```
+    |||,
     args=[d.arg('mountPath', d.T.string)],
   ),
   withEmptyDir(mountPath):: $.withPV(mountPath, { emptyDir: true }),
   '#withConfigMapMount':: d.fn(
-    help='Add a configMap volume mount to the app. Duplicate mount paths across all mount APIs fail, including identical repeats.',
+    help=|||
+      Mount an existing ConfigMap from the app namespace. Read-only by default.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withConfigMapMount('/etc/app', 'dashboard-config'),
+      }
+      ```
+    |||,
     args=[
       d.arg('mountPath', d.T.string),
       d.arg('name', d.T.string),
@@ -737,7 +1214,18 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
     _mountPaths+:: [mountPath],
   },
   '#withSecretMount':: d.fn(
-    help='Add a secret volume mount to the app. Duplicate mount paths across all mount APIs fail, including identical repeats.',
+    help=|||
+      Mount an existing Kubernetes Secret from the app namespace. Read-only by default.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withSecretMount('/run/credentials', 'dashboard-login'),
+      }
+      ```
+    |||,
     args=[
       d.arg('mountPath', d.T.string),
       d.arg('name', d.T.string),
@@ -749,22 +1237,70 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
     _mountPaths+:: [mountPath],
   },
   '#withEnv':: d.fn(
-    help='Add environment variables to the app. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.',
+    help=|||
+      Add plain environment variables as a map. Accepts an object or callback.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withEnv({ TZ: 'Europe/Athens', LOG_LEVEL: 'info' }),
+      }
+      ```
+    |||,
     args=[d.arg('env', 'object | function(ctx) object')],
   ),
   withEnv(env):: { _env+:: resolveObject(env, serviceContext(self), 'withEnv') },
   '#withFieldRefEnv':: d.fn(
-    help='Add environment variable references to the app. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.',
+    help=|||
+      Add environment variables from pod fields using the downward API. Map variable names to field paths. Accepts an object or callback.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withFieldRefEnv({ POD_NAME: 'metadata.name', POD_NAMESPACE: 'metadata.namespace' }),
+      }
+      ```
+    |||,
     args=[d.arg('envs', 'object | function(ctx) object')],
   ),
   withFieldRefEnv(envs):: { _fieldRefEnvs+:: resolveObject(envs, serviceContext(self), 'withFieldRefEnv') },
   '#withSecretEnv':: d.fn(
-    help='Add environment variables from existing Kubernetes Secrets. Accepts an object or function(ctx) returning an object; see the lazy configuration callback contract above.',
+    help=|||
+      Read environment variables from existing Kubernetes Secrets in the app namespace. Map variables to `{ name: secretName, key: secretKey }`. Accepts an object or callback.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withSecretEnv({ API_TOKEN: { name: 'dashboard-login', key: 'token' } }),
+      }
+      ```
+    |||,
     args=[d.arg('envs', 'object | function(ctx) object')],
   ),
   withSecretEnv(envs):: { _secretEnvs+:: resolveObject(envs, serviceContext(self), 'withSecretEnv') },
   '#withExternalSecretEnvs':: d.fn(
-    help='Add an external secret with environment variable mappings. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }',
+    help=|||
+      Create an ExternalSecret and read its keys as environment variables. Map variable names to keys in the extracted remote object. `cfg.store` is required; `storeKind` defaults to `ClusterSecretStore` and `remoteKey` to the secret name.
+
+      Optional fields: `refreshInterval`, `refreshPolicy`, `creationPolicy`, `deletionPolicy`. Omitted policy fields use controller defaults. Requires External Secrets Operator and an existing store.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withExternalSecretEnvs('dashboard-login', { API_TOKEN: 'token' }, {
+            store: 'password-store', remoteKey: 'dashboard', refreshPolicy: 'CreatedOnce',
+          }),
+      }
+      ```
+    |||,
     args=[
       d.arg('name', d.T.string),
       d.arg('envs', d.T.object),
@@ -773,7 +1309,18 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
   ),
   withExternalSecretEnvs(name, envs, cfg):: { _externalSecrets+:: { [name]+: cfg { envs: envs } } },
   '#withExternalSecretMount':: d.fn(
-    help='Add an external secret mounted as a volume. Duplicate mount paths across all mount APIs fail, including identical repeats; the same secret may be mounted at different paths. cfg = { store: string, storeKind?: string, remoteKey?: string, refreshInterval?: string, refreshPolicy?: string, creationPolicy?: string, deletionPolicy?: string }',
+    help=|||
+      Create an ExternalSecret and mount the resulting Secret read-only by default. Uses the same `cfg` fields as `withExternalSecretEnvs`. Extracts the whole remote object. A secret can be mounted at multiple distinct paths.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withExternalSecretMount('dashboard-login', '/run/credentials', { store: 'password-store', remoteKey: 'dashboard' }),
+      }
+      ```
+    |||,
     args=[
       d.arg('name', d.T.string),
       d.arg('mountPath', d.T.string),
@@ -787,40 +1334,109 @@ local dedupRoutes(routes) = dedupBy(routes, function(r) r.portName);
     _mountPaths+:: [mountPath],
   },
   '#withImagePullSecrets':: d.fn(
-    help='Add image pull secrets to the app',
+    help=|||
+      Add names of existing image pull Secrets in the app namespace.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withImagePullSecrets(['registry-login']),
+      }
+      ```
+    |||,
     args=[d.arg('secrets', d.T.array)],
   ),
   withImagePullSecrets(secrets):: { _imagePullSecrets+:: secrets },
   '#withNamespaceLabels':: d.fn(
-    help='Add namespace labels to the app',
+    help=|||
+      Add namespace labels. Call `withCreateNamespace()` to emit the Namespace resource.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withCreateNamespace()
+          + lab.withNamespaceLabels({ 'pod-security.kubernetes.io/enforce': 'restricted' }),
+      }
+      ```
+    |||,
     args=[d.arg('labels', d.T.object)],
   ),
   withNamespaceLabels(labels):: { _namespaceLabels+:: labels },
   '#withNamespaceAnnotations':: d.fn(
-    help='Add namespace annotations to the app',
+    help=|||
+      Add namespace annotations. Call `withCreateNamespace()` to emit the Namespace resource.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withCreateNamespace()
+          + lab.withNamespaceAnnotations({ owner: 'platform' }),
+      }
+      ```
+    |||,
     args=[d.arg('annotations', d.T.object)],
   ),
   withNamespaceAnnotations(annotations):: { _namespaceAnnotations+:: annotations },
 
   // Pod template labels/annotations (distinct from namespace labels/annotations)
   '#withPodLabels':: d.fn(
-    help='Add pod labels to the app',
+    help=|||
+      Add pod labels. Labels used by the workload selector cannot be changed.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withPodLabels({ component: 'dashboard' }),
+      }
+      ```
+    |||,
     args=[d.arg('labels', d.T.object)],
   ),
   withPodLabels(l):: { _podLabels+:: l },
   '#withPodAnnotations':: d.fn(
-    help='Add pod annotations to the app',
+    help=|||
+      Add annotations to the pod template.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withPodAnnotations({ 'reloader.stakater.com/auto': 'true' }),
+      }
+      ```
+    |||,
     args=[d.arg('annotations', d.T.object)],
   ),
   withPodAnnotations(annotations):: { _podAnnotations+:: annotations },
 
   '#withServiceMonitor':: d.fn(
-    help='Add a ServiceMonitor for Prometheus/VictoriaMetrics scraping. portName must match an exposed Service port name after deduplication; name defaults to portName.',
+    help=|||
+      Create a ServiceMonitor for an ordinary Service port. `portName` must match the final Service port name. Defaults: `metrics`, `/metrics`, `30s`, and a monitor name matching `portName`. Requires a monitoring operator and the ServiceMonitor CRD.
+
+      ```jsonnet
+      {
+        dashboard:
+          lab.new('dashboard', 'ghcr.io/example/dashboard:1.0')
+          + lab.withPort({ port: 8080 })
+          + lab.withPort({ port: 9090, name: 'metrics' })
+          + lab.withServiceMonitor(),
+      }
+      ```
+    |||,
     args=[
-      d.arg('portName', d.T.string),
-      d.arg('path', d.T.string),
-      d.arg('interval', d.T.string),
-      d.arg('name', d.T.string),
+      d.arg('portName', d.T.string, 'metrics'),
+      d.arg('path', d.T.string, '/metrics'),
+      d.arg('interval', d.T.string, '30s'),
+      d.argument.fromSchema('name', { type: ['string', 'null'], default: null }),
     ],
   ),
   withServiceMonitor(portName='metrics', path='/metrics', interval='30s', name=null):: {

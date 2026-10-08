@@ -2,6 +2,8 @@
 // gateway parameter: { name, namespace, sectionName }
 // L7 routes default sectionName to 'https'; L4 routes require it.
 
+local d = import 'github.com/jsonnet-libs/docsonnet/doc-util/main.libsonnet';
+
 local gatewayApi = import 'gateway-api.libsonnet';
 
 
@@ -30,6 +32,38 @@ local buildRoute(rt, name, namespace, serviceName, port, gateway, hostnames, rul
 
 {
 
+  '#':: d.pkg(
+    name='gateway',
+    url='https://github.com/dzervas/labsonnet',
+    filename=std.thisFile,
+    version='main',
+    help='Create Gateway API HTTP, gRPC, TCP, and UDP routes to Services. The matching Gateway API route CRDs must be installed.',
+  ) + d.package.withInstallTemplate('jb install github.com/dzervas/labsonnet/labsonnet@main')
+    + d.package.withUsageTemplate("local gateway = import 'labsonnet/helpers/gateway.libsonnet'"),
+
+  '#httpRoute':: d.fn(|||
+    Create an HTTPRoute to a Service. The route uses the `https` listener by default, matches `/` by default, and always sets the supplied host name.
+
+    Example:
+
+    ```jsonnet
+    local g = import 'labsonnet/helpers/gateway.libsonnet';
+    {
+      httpRoute: g.httpRoute('api', 'apps', 'api', 8080, 'api.example.test',
+        { name: 'public', namespace: 'gateway' }),
+    }
+    ```
+  |||, [
+    d.arg('name', d.T.string),
+    d.arg('namespace', d.T.string),
+    d.arg('serviceName', d.T.string),
+    d.arg('port', d.T.number),
+    d.arg('fqdn', d.T.string),
+    d.arg('gateway', d.T.object),
+    d.argument.fromSchema('matches', { type: ['array', 'null'], default: null }),
+    d.arg('annotations', d.T.object, {}),
+    d.arg('filters', d.T.array, []),
+  ]),
   httpRoute(name, namespace, serviceName, port, fqdn, gateway, matches=null, annotations={}, filters=[])::
     local gw = { sectionName: 'https' } + gateway;
     local rt = {
@@ -54,6 +88,27 @@ local buildRoute(rt, name, namespace, serviceName, port, gateway, hostnames, rul
     buildRoute(rt, name, namespace, serviceName, port, gw, [fqdn], rule, annotations),
 
 
+  '#grpcRoute':: d.fn(|||
+    Create a GRPCRoute to a Service. The route uses the `https` listener by default and sets the supplied host name.
+
+    Example:
+
+    ```jsonnet
+    local g = import 'labsonnet/helpers/gateway.libsonnet';
+    {
+      grpcRoute: g.grpcRoute('greeter', 'apps', 'greeter', 9000, 'grpc.example.test',
+        { name: 'public', namespace: 'gateway' }),
+    }
+    ```
+  |||, [
+    d.arg('name', d.T.string),
+    d.arg('namespace', d.T.string),
+    d.arg('serviceName', d.T.string),
+    d.arg('port', d.T.number),
+    d.arg('fqdn', d.T.string),
+    d.arg('gateway', d.T.object),
+    d.arg('annotations', d.T.object, {}),
+  ]),
   grpcRoute(name, namespace, serviceName, port, fqdn, gateway, annotations={})::
     local gw = { sectionName: 'https' } + gateway;
     local rt = {
@@ -70,6 +125,26 @@ local buildRoute(rt, name, namespace, serviceName, port, gateway, hostnames, rul
     buildRoute(rt, name, namespace, serviceName, port, gw, [fqdn], rule, annotations),
 
 
+  '#tcpRoute':: d.fn(|||
+    Create a TCPRoute to a Service. `gateway` must include `name`, `namespace`, and `sectionName` for the TCP listener.
+
+    Example:
+
+    ```jsonnet
+    local g = import 'labsonnet/helpers/gateway.libsonnet';
+    {
+      tcpRoute: g.tcpRoute('database', 'apps', 'database', 5432,
+        { name: 'public', namespace: 'gateway', sectionName: 'tcp' }),
+    }
+    ```
+  |||, [
+    d.arg('name', d.T.string),
+    d.arg('namespace', d.T.string),
+    d.arg('serviceName', d.T.string),
+    d.arg('port', d.T.number),
+    d.arg('gateway', d.T.object),
+    d.arg('annotations', d.T.object, {}),
+  ]),
   tcpRoute(name, namespace, serviceName, port, gateway, annotations={})::
     assert std.objectHas(gateway, 'sectionName') :
            "tcpRoute '%s': gateway.sectionName is required for L4 routes" % name;
@@ -87,6 +162,26 @@ local buildRoute(rt, name, namespace, serviceName, port, gateway, hostnames, rul
     buildRoute(rt, name, namespace, serviceName, port, gateway, [], rule, annotations),
 
 
+  '#udpRoute':: d.fn(|||
+    Create a UDPRoute to a Service. `gateway` must include `name`, `namespace`, and `sectionName` for the UDP listener.
+
+    Example:
+
+    ```jsonnet
+    local g = import 'labsonnet/helpers/gateway.libsonnet';
+    {
+      udpRoute: g.udpRoute('dns', 'apps', 'dns', 53,
+        { name: 'public', namespace: 'gateway', sectionName: 'udp' }),
+    }
+    ```
+  |||, [
+    d.arg('name', d.T.string),
+    d.arg('namespace', d.T.string),
+    d.arg('serviceName', d.T.string),
+    d.arg('port', d.T.number),
+    d.arg('gateway', d.T.object),
+    d.arg('annotations', d.T.object, {}),
+  ]),
   udpRoute(name, namespace, serviceName, port, gateway, annotations={})::
     assert std.objectHas(gateway, 'sectionName') :
            "udpRoute '%s': gateway.sectionName is required for L4 routes" % name;
