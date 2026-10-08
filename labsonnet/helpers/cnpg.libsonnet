@@ -159,12 +159,10 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
       [if property != null then 'property']: property,
     },
 
-  generatedCredentials(generatorName, replicationStore=null, replicationStoreKind='ClusterSecretStore', replicationServiceAccount=null, replicationNamespace=null)::
+  generatedCredentials(generatorName, replicationStore=null, replicationStoreKind='ClusterSecretStore', replicationNamespace=null)::
     assert nonEmptyString(generatorName) : 'labsonnet CNPG: generated credentials require a non-empty generatorName';
     assert replicationStore == null || nonEmptyString(replicationStore) : 'labsonnet CNPG: generated credentials replicationStore must be a non-empty string or null';
     assert replicationStoreKind == null || nonEmptyString(replicationStoreKind) : 'labsonnet CNPG: generated credentials replicationStoreKind must be a non-empty string or null';
-    assert replicationServiceAccount == null || std.isObject(replicationServiceAccount)
-           : 'labsonnet CNPG: generated credentials replicationServiceAccount must be an object or null';
     assert replicationNamespace == null || nonEmptyString(replicationNamespace)
            : 'labsonnet CNPG: generated credentials replicationNamespace must be a non-empty string or null';
     {
@@ -172,7 +170,6 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
       generatorName: generatorName,
       [if replicationStore != null then 'replicationStore']: replicationStore,
       [if replicationStore != null && replicationStoreKind != null then 'replicationStoreKind']: replicationStoreKind,
-      [if replicationServiceAccount != null then 'replicationServiceAccount']: replicationServiceAccount,
       [if replicationNamespace != null then 'replicationNamespace']: replicationNamespace,
     },
 
@@ -305,9 +302,14 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
   // Build the shared External Secrets resources used for generated credentials.
   // The replication Store is cluster-scoped, while its reader ServiceAccount and
   // password generator live in the source namespace.
-  newCredentialInfrastructure(name, namespace='default', generatorName=null, passwordSpec={})::
+  newCredentialInfrastructure(name, namespace='default', generatorName=null, passwordSpec={}, serviceAccountName=null, serviceAccountNamespace=namespace)::
     local actualGeneratorName = if generatorName == null then name + '-password' else generatorName;
-    local store = externalSecret.newKubernetesReplicationStore(name, namespace);
+    local store = externalSecret.newKubernetesReplicationStore(
+      name,
+      namespace,
+      serviceAccountName=serviceAccountName,
+      serviceAccountNamespace=serviceAccountNamespace
+    );
     {
       passwordGenerator: externalSecret.newPasswordGenerator(actualGeneratorName, namespace, passwordSpec),
       credentialReader: store.credentialReader,
@@ -349,6 +351,18 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
   newRole(name, clusterName, secretName, namespace='default', roleName=name, reclaimPolicy='retain', spec={})::
     roleResource(name, clusterName, secretName, namespace, roleName, reclaimPolicy, spec),
 
+  // Project wrappers supply the shared reader identity through this helper's
+  // default arguments. Generic tenants emit no grant until a reader is supplied.
+  newCredentialReadGrant(role, serviceAccountName=null, serviceAccountNamespace=role.metadata.namespace)::
+    if serviceAccountName == null then {}
+    else externalSecret.newSecretReadGrant(
+      role.metadata.name,
+      role.metadata.namespace,
+      [role.spec.passwordSecret.name],
+      serviceAccountName,
+      serviceAccountNamespace
+    ),
+
   // Emit a tenant's Database, DatabaseRole, and credentials ExternalSecrets.
   // credentials is either {mode:'remote', store, storeKind?, remoteKey, property?}
   // or {mode:'generated', generatorName, generatorKind?, replicationStore?, replicationStoreKind?}.
@@ -360,15 +374,11 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
            : 'labsonnet CNPG: tenant roleSpec must not override name, cluster, or passwordSecret';
     local remote = credentials.mode == 'remote';
     local sameNamespace = appNamespace == clusterNamespace;
-    local hasReplicationServiceAccount = std.isObject(credentials) && std.objectHas(credentials, 'replicationServiceAccount');
-    local replicationServiceAccount = if hasReplicationServiceAccount then credentials.replicationServiceAccount else null;
-    local replicationServiceAccountNamespace =
-      if std.isObject(replicationServiceAccount) then std.get(replicationServiceAccount, 'namespace', clusterNamespace)
-      else clusterNamespace;
     local tenantResourceName = if resourceName == null then clusterName + '-' + name else resourceName;
     local tenantSecretName = if secretName == null then name + '-postgres' else secretName;
     local host = clusterName + '-rw.' + clusterNamespace + '.svc';
     local roleTemplate = roleSecretTemplate(name, name, host, sameNamespace);
+    local role = roleResource(tenantResourceName, clusterName, tenantSecretName, clusterNamespace, name, 'retain', roleSpec);
     assert tenantConnectionName(name) : 'labsonnet CNPG: tenant name must be at most 63 ASCII letters, digits, or URI-unreserved characters';
     assert validDnsLabel(clusterName) : 'labsonnet CNPG: cluster name must be a valid DNS label';
     assert validDnsLabel(clusterNamespace) : 'labsonnet CNPG: cluster namespace must be a valid DNS label';
@@ -398,13 +408,6 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
            : "labsonnet CNPG '%s': storeKind is only valid as a non-empty remote credential option" % name;
     assert !std.objectHas(credentials, 'replicationStoreKind') || (!remote && nonEmptyString(credentials.replicationStoreKind))
            : "labsonnet CNPG '%s': replicationStoreKind is only valid as a non-empty generated credential option" % name;
-    assert !hasReplicationServiceAccount || !remote
-           : "labsonnet CNPG '%s': replicationServiceAccount is only valid for generated credentials" % name;
-    assert !hasReplicationServiceAccount || replicationServiceAccount == null || (
-      std.isObject(replicationServiceAccount)
-      && validDnsLabel(std.get(replicationServiceAccount, 'name'))
-      && validDnsLabel(replicationServiceAccountNamespace)
-    ) : "labsonnet CNPG '%s': replicationServiceAccount requires a valid name and optional valid namespace" % name;
     assert !std.objectHas(credentials, 'replicationNamespace') || !remote
            : "labsonnet CNPG '%s': replicationNamespace is only valid for generated credentials" % name;
     assert !std.objectHas(credentials, 'replicationNamespace')
@@ -416,7 +419,7 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
            || credentials.replicationNamespace == clusterNamespace
            : "labsonnet CNPG '%s': replicationNamespace must match clusterNamespace for cross-namespace credentials" % name;
     {
-      role: roleResource(tenantResourceName, clusterName, tenantSecretName, clusterNamespace, name, 'retain', roleSpec),
+      role: role,
       database: databaseResource(tenantResourceName, name, clusterName, name, clusterNamespace, 'retain', databaseSpec),
       roleCredentials:
         if remote then
@@ -473,15 +476,5 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
             'Periodic',
             '1m'
           ),
-    } + (
-      if hasReplicationServiceAccount && replicationServiceAccount != null && !remote && !sameNamespace then
-        externalSecret.newSecretReadGrant(
-          tenantResourceName,
-          clusterNamespace,
-          [tenantSecretName],
-          replicationServiceAccount.name,
-          serviceAccountNamespace=replicationServiceAccountNamespace
-        )
-      else {}
-    ),
+    } + (if !remote && !sameNamespace then self.newCredentialReadGrant(role) else {}),
 }

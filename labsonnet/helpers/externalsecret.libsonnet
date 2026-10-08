@@ -48,16 +48,17 @@ local validDnsSubdomain(value) =
 
   // Create the ServiceAccount and ClusterSecretStore used to replicate secrets
   // from one namespace. The matching Role grants are intentionally separate.
-  newKubernetesReplicationStore(name, namespace, serviceAccountName=null)::
+  newKubernetesReplicationStore(name, namespace, serviceAccountName=null, serviceAccountNamespace=namespace)::
     local readerName = if serviceAccountName == null then name else serviceAccountName;
     assert validDnsSubdomain(name) : 'labsonnet ExternalSecret: replication store name must be a valid DNS subdomain';
     assert validDnsLabel(namespace) : 'labsonnet ExternalSecret: replication store namespace must be a valid DNS label';
     assert validDnsLabel(readerName) : 'labsonnet ExternalSecret: credential reader ServiceAccount name must be a valid DNS label';
+    assert validDnsLabel(serviceAccountNamespace) : 'labsonnet ExternalSecret: credential reader ServiceAccount namespace must be a valid DNS label';
     {
       credentialReader: {
         apiVersion: 'v1',
         kind: 'ServiceAccount',
-        metadata: { name: readerName, namespace: namespace },
+        metadata: { name: readerName, namespace: serviceAccountNamespace },
         automountServiceAccountToken: false,
       },
       credentialStore:
@@ -68,7 +69,7 @@ local validDnsSubdomain(value) =
               kubernetes: {
                 remoteNamespace: namespace,
                 auth: {
-                  serviceAccount: { name: readerName, namespace: namespace },
+                  serviceAccount: { name: readerName, namespace: serviceAccountNamespace },
                 },
                 server: {
                   url: 'https://kubernetes.default.svc',
