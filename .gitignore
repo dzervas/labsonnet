@@ -1,1 +1,4 @@
 vendor/
+.direnv/
+__pycache__/
+*.py[cod]

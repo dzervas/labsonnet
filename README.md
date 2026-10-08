@@ -2,6 +2,23 @@
 
 Build Kubernetes workloads for Tanka from container images.
 
+For development, run `direnv allow` to load the flake shell through nix-direnv,
+or enter it directly with `nix develop`. The shell provides Jsonnet, jb,
+and Python 3; these tools can also be installed separately.
+
+```bash
+jb install
+python3 -m unittest discover -s tests -v
+```
+
+Python tests use standard-library `unittest` and the Jsonnet CLI to fully render
+fixtures and check composition, resource relationships, and safety boundaries.
+No cluster or Python packages are required. Jsonnet dependencies in `vendor/`
+are installed by jb.
+The same tests run in GitHub Actions on pull requests and pushes to `main`.
+
+Documentation in [docs](./docs)
+
 Usage and API documentation: [workload generator](./docs/README.md) and
 [standalone helpers](./docs/README.md#subpackages). See
 [downstream helpers and overrides](./docs/downstream.md) for local defaults and reusable wrappers.
