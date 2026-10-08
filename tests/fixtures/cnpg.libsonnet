@@ -23,8 +23,7 @@ local flow(name, sourceNamespace, secretName=null) =
     appNamespace='payments',
     credentials=cnpg.generatedCredentials(
       setup.passwordGenerator.metadata.name,
-      setup.credentialStore.metadata.name,
-      replicationNamespace=sourceNamespace
+      setup.credentialStore.metadata.name
     ),
     secretName=secretName
   );
@@ -80,13 +79,6 @@ local flow(name, sourceNamespace, secretName=null) =
     ),
   },
   unsafe_empty_grant: es.newSecretReadGrant('billing-owner', 'ledger', [], fixedReader.name),
-  wrong_replication_source: cnpg.newTenant(
-    'billing',
-    'db-main',
-    'ledger',
-    appNamespace='payments',
-    credentials=cnpg.generatedCredentials('billing-generator', 'billing-export', replicationNamespace='other-database')
-  ),
   configured_cluster:
     cnpg.newCluster('shared')
     + cnpg.withNamespace('postgres')

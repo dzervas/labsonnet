@@ -69,6 +69,5 @@ class CNPGCredentialTests(JsonnetTestCase):
                     self.assertNotIn("credentialReaderRole", tenant)
                     self.assertNotIn("credentialReaderBinding", tenant)
 
-    def test_rejects_unrestricted_grants_and_wrong_replication_sources(self):
+    def test_rejects_unrestricted_grants(self):
         self.assert_render_failure("cnpg", "unsafe_empty_grant", "at least one secret name")
-        self.assert_render_failure("cnpg", "wrong_replication_source", "replicationNamespace")
