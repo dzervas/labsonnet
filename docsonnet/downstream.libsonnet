@@ -139,6 +139,12 @@ local d = import 'github.com/jsonnet-libs/docsonnet/doc-util/main.libsonnet';
     reader defaults remain in effect. Calling `base.newTenant(...)` bypasses
     those overrides.
 
+    When locally overriding `newCredentialInfrastructure`'s `serviceAccountName`
+    or `serviceAccountNamespace`, keep `newCredentialReadGrant`'s reader settings
+    in sync. The store's ServiceAccount and the RoleBinding's subject must have
+    the same name and namespace; otherwise the reader has no grant to read the
+    Secret. Define that identity once and reuse it in both overrides.
+
     At workload level, later scalar settings such as `withAffinity` win; ports,
     mounts, and containers accumulate; environment maps merge by key. Inside a
     wrapper, `defaults + overrides` lets caller keys win, but that merge is

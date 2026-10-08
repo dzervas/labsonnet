@@ -361,6 +361,10 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
     Create a Password generator, reader ServiceAccount, and ClusterSecretStore for generated credentials.
     The generator name defaults to `<name>-password`; the reader ServiceAccount namespace defaults to the `namespace` argument.
 
+    If a local wrapper overrides `serviceAccountName` or `serviceAccountNamespace`,
+    keep `newCredentialReadGrant` configured for that same reader. Its RoleBinding
+    must target the ServiceAccount used by the store to read Secrets.
+
     Example:
 
     ```jsonnet
@@ -605,6 +609,9 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
   // default arguments. Generic tenants emit no grant until a reader is supplied.
   '#newCredentialReadGrant':: d.fn(|||
     Allow a ServiceAccount to read the password Secret referenced by a DatabaseRole. The ServiceAccount namespace defaults to the role namespace. If `serviceAccountName` is null, return an empty object.
+
+    Use the same ServiceAccount name and namespace as `newCredentialInfrastructure`,
+    including any overrides in your local wrapper.
 
     Example:
 
