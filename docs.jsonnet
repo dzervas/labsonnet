@@ -7,7 +7,8 @@ local rendered = d.render(lab {
   helpers:: {
     affinity:: import 'labsonnet/helpers/affinity.libsonnet',
     certificate:: import 'labsonnet/helpers/certificate.libsonnet',
-    cnpg:: import 'labsonnet/helpers/cnpg.libsonnet',
+    // Document the alias in package help without copying the upstream API docs.
+    cnpg:: (import 'labsonnet/helpers/cnpg.libsonnet') { cluster:: null },
     externalsecret:: import 'labsonnet/helpers/externalsecret.libsonnet',
     gateway:: import 'labsonnet/helpers/gateway.libsonnet',
     imagevolume:: import 'labsonnet/helpers/imagevolume.libsonnet',

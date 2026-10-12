@@ -1,7 +1,7 @@
 // Generic CloudNativePG builders using labsonnet's resource helpers.
 local d = import 'github.com/jsonnet-libs/docsonnet/doc-util/main.libsonnet';
 local externalSecret = import './externalsecret.libsonnet';
-local imageVolume = import './imagevolume.libsonnet';
+local cloudnativePg = import 'cloudnative-pg.libsonnet';
 
 local mergeObjects(base, overrides) =
   if std.isObject(base) && std.isObject(overrides) then
@@ -34,16 +34,6 @@ local validDnsSubdomain(value) =
   nonEmptyString(value)
   && std.length(value) <= 253
   && std.all([validDnsLabel(label) for label in std.split(value, '.')]);
-local validExtensionName(value) =
-  nonEmptyString(value)
-  && std.length(value) <= 59
-  // Reuse validDnsLabel after replacing underscores with dashes
-  && validDnsLabel(std.strReplace(value, '_', '-'));
-local unique(items) = std.foldl(
-  function(result, item) if std.member(result, item) then result else result + [item],
-  items,
-  []
-);
 local sqlName(value) = nonEmptyString(value) && std.length(std.encodeUTF8(value)) <= 63;
 local tenantConnectionName(value) =
   nonEmptyString(value)
@@ -152,9 +142,42 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
     url='https://github.com/dzervas/labsonnet',
     filename=std.thisFile,
     version='main',
-    help='Build CloudNativePG clusters, databases, roles, and tenant credentials. Requires CloudNativePG and External Secrets Operator CRDs.',
+    help=|||
+      Build CloudNativePG databases, roles, and tenant credentials. Requires CloudNativePG and External Secrets Operator CRDs.
+
+      `cluster` re-exports the upstream [cloudnative-pg-libsonnet](https://github.com/jsonnet-libs/cloudnative-pg-libsonnet) Cluster builder unchanged. It returns the resource itself; set instances, storage, and placement explicitly. Cluster defaults belong in downstream configuration.
+
+      To use `cnpg.cluster`, install the upstream dependency in your Tanka project:
+
+      ```bash
+      jb install github.com/jsonnet-libs/cloudnative-pg-libsonnet@main
+      ```
+
+      You must also create `lib/cloudnative-pg.libsonnet` with a one-line import selecting your upstream schema version, for example:
+
+      ```jsonnet
+      import 'github.com/jsonnet-libs/cloudnative-pg-libsonnet/1.27.0/main.libsonnet'
+      ```
+
+      Choose a version available in your `vendor/` directory and compatible with your operator. Tanka includes `lib/` and `vendor/` in its import paths; when using the Jsonnet CLI, pass `-J lib -J vendor`. The downstream import selects the schema version, and your project's `jsonnetfile.lock.json` pins the dependency revision.
+
+      ```jsonnet
+      local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+      local cluster = cnpg.cluster;
+      {
+        postgres:
+          cluster.new('postgres')
+          + cluster.metadata.withNamespace('database')
+          + cluster.spec.withInstances(3)
+          + cluster.spec.storage.withSize('50Gi'),
+      }
+      ```
+    |||,
   ) + d.package.withInstallTemplate('jb install github.com/dzervas/labsonnet/labsonnet@main')
     + d.package.withUsageTemplate("local cnpg = import 'labsonnet/helpers/cnpg.libsonnet'"),
+
+  // Preserve the upstream API and let the downstream lib import choose its version.
+  cluster:: cloudnativePg.postgresql.v1.cluster,
 
   '#remoteCredentials':: d.fn(|||
     Describe credentials that an ExternalSecret reads from a SecretStore. Use this object as the `credentials` value for `newTenant`.
@@ -208,152 +231,6 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
       [if replicationStore != null && replicationStoreKind != null then 'replicationStoreKind']: replicationStoreKind,
     },
 
-  // Create a CNPG Cluster. Defaults are intentionally small and portable;
-  // image and storage class are left to operator/cluster defaults.
-  '#newCluster':: d.fn(|||
-    Start a Cluster builder. Defaults are namespace `default`, one instance, and `5Gi` storage. The image and storage class are left to the operator and cluster defaults. Pods use required anti-affinity across host names by default.
-
-    Add options with `withNamespace`, `withInstances`, `withStorageSize`, `withStorageClass`, `withImage`, `withAffinity`, `withRole`, `withExtension`, `withSharedPreloadLibraries`, or `withClusterSpec`. Tanka finds the Cluster resource inside the builder.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    local affinity = import 'labsonnet/helpers/affinity.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withNamespace('database')
-        + cnpg.withInstances(3)
-        + cnpg.withStorageSize('50Gi')
-        + cnpg.withAffinity(affinity.requireNodeLabel('nodepool', ['database'])),
-    }
-    ```
-  |||, [d.arg('name', d.T.string)]),
-  newCluster(name):: {
-    _name:: name,
-    _namespace:: 'default',
-    _instances:: 1,
-    _storageSize:: '5Gi',
-    _storageClass:: null,
-    _image:: null,
-    _affinity:: null,
-    _roles:: [],
-    _extensions:: [],
-    _preloadLibraries:: [],
-    _clusterSpecs:: [],
-
-    local cfg = self,
-    cluster:
-      local nodeAffinity =
-        if cfg._affinity == null then null
-        else if std.isObject(cfg._affinity) && std.objectHas(cfg._affinity, 'nodeAffinity')
-        then cfg._affinity.nodeAffinity
-        else cfg._affinity;
-      local defaults = {
-                         instances: cfg._instances,
-                         storage: {
-                           size: cfg._storageSize,
-                           [if cfg._storageClass != null then 'storageClass']: cfg._storageClass,
-                         },
-                         affinity: {
-                           enablePodAntiAffinity: true,
-                           podAntiAffinityType: 'required',
-                           topologyKey: 'kubernetes.io/hostname',
-                           [if nodeAffinity != null then 'nodeAffinity']: nodeAffinity,
-                         },
-                       }
-                       + (if cfg._image != null then { imageName: cfg._image } else {})
-                       + (if std.length(cfg._roles) > 0 then {
-                            managed: {
-                              roles: [
-                                {
-                                  name: role.name,
-                                  ensure: 'present',
-                                  login: true,
-                                  superuser: false,
-                                  passwordSecret: { name: role.secretName },
-                                }
-                                for role in cfg._roles
-                              ],
-                            },
-                          } else {});
-      local extensionSpec =
-        if std.length(cfg._extensions) == 0 then {}
-        else {
-          postgresql: {
-            extensions: [
-              mergeObjects(
-                { name: extension.name }
-                + (if extension.image != null then {
-                     image: imageVolume.source(
-                       extension.image,
-                       if std.objectHas(extension.config, 'image') && std.objectHas(extension.config.image, 'pullPolicy')
-                       then extension.config.image.pullPolicy
-                       else null
-                     ),
-                   } else {}),
-                { [key]: extension.config[key] for key in std.objectFields(extension.config) if key != 'image' }
-              )
-              for extension in cfg._extensions
-            ],
-          },
-        };
-      local preloadSpec =
-        if std.length(cfg._preloadLibraries) == 0 then {}
-        else { postgresql: { shared_preload_libraries: unique(cfg._preloadLibraries) } };
-      local customSpec = std.foldl(mergeObjects, cfg._clusterSpecs, {});
-      local finalSpec = mergeObjects(mergeObjects(mergeObjects(defaults, extensionSpec), preloadSpec), customSpec);
-      assert validDnsLabel(cfg._name) : 'labsonnet CNPG: cluster name must be a valid DNS label';
-      assert validDnsLabel(cfg._namespace) : 'labsonnet CNPG: namespace must be a valid DNS label';
-      assert std.isNumber(cfg._instances) && cfg._instances >= 1 && std.floor(cfg._instances) == cfg._instances
-             : "labsonnet CNPG '%s': instances must be a positive integer" % cfg._name;
-      assert nonEmptyString(cfg._storageSize)
-             : "labsonnet CNPG '%s': storage size must be a non-empty string" % cfg._name;
-      assert cfg._storageClass == null || nonEmptyString(cfg._storageClass)
-             : "labsonnet CNPG '%s': storage class must be a non-empty string or null" % cfg._name;
-      assert cfg._image == null || nonEmptyString(cfg._image)
-             : "labsonnet CNPG '%s': image must be a non-empty string or null" % cfg._name;
-      assert cfg._affinity == null || (std.isObject(cfg._affinity) && std.isObject(nodeAffinity))
-             : "labsonnet CNPG '%s': withAffinity expects a nodeAffinity object or an object containing nodeAffinity" % cfg._name;
-      assert std.all([std.isObject(spec) for spec in cfg._clusterSpecs])
-             : "labsonnet CNPG '%s': cluster spec overrides must be objects" % cfg._name;
-      assert std.all([nonEmptyString(role.name) && nonEmptyString(role.secretName) for role in cfg._roles])
-             : "labsonnet CNPG '%s': role names and secret names must be non-empty strings" % cfg._name;
-      assert std.length(std.set([role.name for role in cfg._roles])) == std.length(cfg._roles)
-             : "labsonnet CNPG '%s': inline role names must be unique" % cfg._name;
-      assert std.all([
-        validExtensionName(extension.name)
-        && (extension.image == null || nonEmptyString(extension.image))
-        && std.isObject(extension.config)
-        && (!std.objectHas(extension.config, 'image') || (
-              extension.image != null
-              &&
-              std.isObject(extension.config.image)
-              && std.all([key == 'pullPolicy' for key in std.objectFields(extension.config.image)])
-            ))
-        && !std.objectHas(extension.config, 'name')
-        for extension in cfg._extensions
-      ])
-             : "labsonnet CNPG '%s': extension name, image reference, and config are invalid" % cfg._name;
-      assert std.length(std.set([std.strReplace(extension.name, '_', '-') for extension in cfg._extensions])) == std.length(cfg._extensions)
-             : "labsonnet CNPG '%s': extension names must be unique" % cfg._name;
-      assert std.all([
-        extension.image != null || std.objectHas(finalSpec, 'imageCatalogRef')
-        for extension in cfg._extensions
-      ]) : "labsonnet CNPG '%s': an imageCatalogRef is required when an extension image is omitted" % cfg._name;
-      assert std.all([nonEmptyString(lib) for lib in cfg._preloadLibraries])
-             : "labsonnet CNPG '%s': shared preload library names must be non-empty strings" % cfg._name;
-      assert std.isNumber(finalSpec.instances) && finalSpec.instances >= 1 && std.floor(finalSpec.instances) == finalSpec.instances
-             : "labsonnet CNPG '%s': final spec.instances must be a positive integer" % cfg._name;
-      {
-        apiVersion: 'postgresql.cnpg.io/v1',
-        kind: 'Cluster',
-        metadata: { name: cfg._name, namespace: cfg._namespace },
-        spec: finalSpec,
-      },
-  },
-
   // Build the shared External Secrets resources used for generated credentials.
   // The replication Store is cluster-scoped and the password generator lives in
   // the source namespace. The reader ServiceAccount namespace is configurable.
@@ -394,175 +271,6 @@ local roleResource(resourceName, clusterName, secretName, namespace, roleName, r
       credentialReader: store.credentialReader,
       credentialStore: store.credentialStore,
     },
-
-  '#withNamespace':: d.fn(|||
-    Set the Cluster namespace. The default is `default`.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withNamespace('database'),
-    }
-    ```
-  |||, [d.arg('namespace', d.T.string)]),
-  withNamespace(namespace):: { _namespace:: namespace },
-  '#withInstances':: d.fn(|||
-    Set the desired number of PostgreSQL instances. The default is `1`.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withInstances(3),
-    }
-    ```
-  |||, [d.arg('instances', d.T.number)]),
-  withInstances(instances):: { _instances:: instances },
-  '#withStorageSize':: d.fn(|||
-    Set the requested storage size for each instance. The default is `5Gi`.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withStorageSize('50Gi'),
-    }
-    ```
-  |||, [d.arg('size', d.T.string)]),
-  withStorageSize(size):: { _storageSize:: size },
-  '#withStorageClass':: d.fn(|||
-    Set the storage class. It is omitted by default.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withStorageClass('fast'),
-    }
-    ```
-  |||, [d.arg('storageClass', d.T.string)]),
-  withStorageClass(storageClass):: { _storageClass:: storageClass },
-  '#withImage':: d.fn(|||
-    Set the PostgreSQL container image. It is omitted by default.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withImage('ghcr.io/example/postgres:18'),
-    }
-    ```
-  |||, [d.arg('image', d.T.string)]),
-  withImage(image):: { _image:: image },
-  // Accept either a full affinity object with a nodeAffinity field (the shape
-  // used by Kubernetes workload helpers) or the nodeAffinity value itself.
-  '#withAffinity':: d.fn(|||
-    Set node affinity. Pass either a node affinity object or an object containing `nodeAffinity`.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    local affinity = import 'labsonnet/helpers/affinity.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withAffinity(affinity.requireNodeLabel('nodepool', ['database'])),
-    }
-    ```
-  |||, [d.arg('affinity', d.T.object)]),
-  withAffinity(affinity):: { _affinity:: affinity },
-  '#withRole':: d.fn(|||
-    Add a managed login role backed by the named password Secret.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withRole('app', 'app-postgres'),
-    }
-    ```
-  |||, [d.arg('name', d.T.string), d.arg('secretName', d.T.string)]),
-  withRole(name, secretName):: {
-    _roles+:: [{ name: name, secretName: secretName }],
-  },
-  // Mount an extension image volume in the CNPG PostgreSQL container. `image`
-  // may be null when the Cluster references an imageCatalogRef.
-  '#withExtension':: d.fn(|||
-    Add a PostgreSQL extension. If `image` is null, the Cluster spec must provide an `imageCatalogRef`.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withExtension('vector', 'ghcr.io/example/vector:1'),
-    }
-    ```
-  |||, [d.arg('name', d.T.string),
-       d.argument.fromSchema('image', { type: ['string', 'null'], default: null }),
-       d.arg('config', d.T.object, {})]),
-  withExtension(name, image=null, config={}):: {
-    _extensions+:: [{ name: name, image: image, config: config }],
-  },
-  // Add PostgreSQL libraries that must be loaded at server startup.
-  '#withSharedPreloadLibraries':: d.fn(|||
-    Add PostgreSQL shared preload libraries. Duplicate names are removed.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withSharedPreloadLibraries(['pg_stat_statements']),
-    }
-    ```
-  |||, [d.arg('libraries', d.T.array)]),
-  withSharedPreloadLibraries(libraries):: {
-    _preloadLibraries+:: assert std.isArray(libraries)
-                                : 'labsonnet CNPG: withSharedPreloadLibraries expects an array'; libraries,
-  },
-  // Raw CNPG fields deep-merge over generated fields and win on conflicts.
-  '#withClusterSpec':: d.fn(|||
-    Deep-merge extra fields into the Cluster spec. These fields override generated values when they conflict.
-
-    Example:
-
-    ```jsonnet
-    local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-    {
-      cluster:
-        cnpg.newCluster('postgres')
-        + cnpg.withClusterSpec({ monitoring: { enablePodMonitor: true } }),
-    }
-    ```
-  |||, [d.arg('spec', d.T.object)]),
-  withClusterSpec(spec):: {
-    _clusterSpecs+:: [assert std.isObject(spec) : 'labsonnet CNPG: withClusterSpec expects an object'; spec],
-  },
 
   // Standalone CNPG Database. Set reclaimPolicy=null to omit the field.
   '#newDatabase':: d.fn(|||

@@ -1,6 +1,35 @@
 # cnpg
 
-Build CloudNativePG clusters, databases, roles, and tenant credentials. Requires CloudNativePG and External Secrets Operator CRDs.
+Build CloudNativePG databases, roles, and tenant credentials. Requires CloudNativePG and External Secrets Operator CRDs.
+
+`cluster` re-exports the upstream [cloudnative-pg-libsonnet](https://github.com/jsonnet-libs/cloudnative-pg-libsonnet) Cluster builder unchanged. It returns the resource itself; set instances, storage, and placement explicitly. Cluster defaults belong in downstream configuration.
+
+To use `cnpg.cluster`, install the upstream dependency in your Tanka project:
+
+```bash
+jb install github.com/jsonnet-libs/cloudnative-pg-libsonnet@main
+```
+
+You must also create `lib/cloudnative-pg.libsonnet` with a one-line import selecting your upstream schema version, for example:
+
+```jsonnet
+import 'github.com/jsonnet-libs/cloudnative-pg-libsonnet/1.27.0/main.libsonnet'
+```
+
+Choose a version available in your `vendor/` directory and compatible with your operator. Tanka includes `lib/` and `vendor/` in its import paths; when using the Jsonnet CLI, pass `-J lib -J vendor`. The downstream import selects the schema version, and your project's `jsonnetfile.lock.json` pins the dependency revision.
+
+```jsonnet
+local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
+local cluster = cnpg.cluster;
+{
+  postgres:
+    cluster.new('postgres')
+    + cluster.metadata.withNamespace('database')
+    + cluster.spec.withInstances(3)
+    + cluster.spec.storage.withSize('50Gi'),
+}
+```
+
 ## Install
 
 ```
@@ -17,23 +46,12 @@ local cnpg = import 'labsonnet/helpers/cnpg.libsonnet'
 ## Index
 
 * [`fn generatedCredentials(generatorName, replicationStore=null, replicationStoreKind="ClusterSecretStore")`](#fn-generatedcredentials)
-* [`fn newCluster(name)`](#fn-newcluster)
 * [`fn newCredentialInfrastructure(name, namespace="default", generatorName=null, passwordSpec={}, serviceAccountName=null, serviceAccountNamespace)`](#fn-newcredentialinfrastructure)
 * [`fn newCredentialReadGrant(role, serviceAccountName=null, serviceAccountNamespace)`](#fn-newcredentialreadgrant)
 * [`fn newDatabase(name, clusterName, ownerName, namespace="default", reclaimPolicy="retain", spec={}, resourceName=null)`](#fn-newdatabase)
 * [`fn newRole(name, clusterName, secretName, namespace="default", roleName, reclaimPolicy="retain", spec={})`](#fn-newrole)
 * [`fn newTenant(name, clusterName, clusterNamespace, appNamespace, credentials=null, resourceName=null, secretName=null, databaseSpec={}, roleSpec={})`](#fn-newtenant)
 * [`fn remoteCredentials(store, remoteKey, storeKind="ClusterSecretStore", property=null)`](#fn-remotecredentials)
-* [`fn withAffinity(affinity)`](#fn-withaffinity)
-* [`fn withClusterSpec(spec)`](#fn-withclusterspec)
-* [`fn withExtension(name, image=null, config={})`](#fn-withextension)
-* [`fn withImage(image)`](#fn-withimage)
-* [`fn withInstances(instances)`](#fn-withinstances)
-* [`fn withNamespace(namespace)`](#fn-withnamespace)
-* [`fn withRole(name, secretName)`](#fn-withrole)
-* [`fn withSharedPreloadLibraries(libraries)`](#fn-withsharedpreloadlibraries)
-* [`fn withStorageClass(storageClass)`](#fn-withstorageclass)
-* [`fn withStorageSize(size)`](#fn-withstoragesize)
 
 ## Fields
 
@@ -59,35 +77,6 @@ Example:
 local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
 {
   credentials: cnpg.generatedCredentials('postgres-password', 'postgres-credentials'),
-}
-```
-
-### fn newCluster
-
-```jsonnet
-newCluster(name)
-```
-
-PARAMETERS:
-
-* **name** (`string`)
-
-Start a Cluster builder. Defaults are namespace `default`, one instance, and `5Gi` storage. The image and storage class are left to the operator and cluster defaults. Pods use required anti-affinity across host names by default.
-
-Add options with `withNamespace`, `withInstances`, `withStorageSize`, `withStorageClass`, `withImage`, `withAffinity`, `withRole`, `withExtension`, `withSharedPreloadLibraries`, or `withClusterSpec`. Tanka finds the Cluster resource inside the builder.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-local affinity = import 'labsonnet/helpers/affinity.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withNamespace('database')
-    + cnpg.withInstances(3)
-    + cnpg.withStorageSize('50Gi')
-    + cnpg.withAffinity(affinity.requireNodeLabel('nodepool', ['database'])),
 }
 ```
 
@@ -276,241 +265,5 @@ Example:
 local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
 {
   credentials: cnpg.remoteCredentials('app-secrets', 'catalog-password'),
-}
-```
-
-### fn withAffinity
-
-```jsonnet
-withAffinity(affinity)
-```
-
-PARAMETERS:
-
-* **affinity** (`object`)
-
-Set node affinity. Pass either a node affinity object or an object containing `nodeAffinity`.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-local affinity = import 'labsonnet/helpers/affinity.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withAffinity(affinity.requireNodeLabel('nodepool', ['database'])),
-}
-```
-
-### fn withClusterSpec
-
-```jsonnet
-withClusterSpec(spec)
-```
-
-PARAMETERS:
-
-* **spec** (`object`)
-
-Deep-merge extra fields into the Cluster spec. These fields override generated values when they conflict.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withClusterSpec({ monitoring: { enablePodMonitor: true } }),
-}
-```
-
-### fn withExtension
-
-```jsonnet
-withExtension(name, image=null, config={})
-```
-
-PARAMETERS:
-
-* **name** (`string`)
-* **image** (`null`,`string`)
-   - default value: `null`
-* **config** (`object`)
-   - default value: `{}`
-
-Add a PostgreSQL extension. If `image` is null, the Cluster spec must provide an `imageCatalogRef`.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withExtension('vector', 'ghcr.io/example/vector:1'),
-}
-```
-
-### fn withImage
-
-```jsonnet
-withImage(image)
-```
-
-PARAMETERS:
-
-* **image** (`string`)
-
-Set the PostgreSQL container image. It is omitted by default.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withImage('ghcr.io/example/postgres:18'),
-}
-```
-
-### fn withInstances
-
-```jsonnet
-withInstances(instances)
-```
-
-PARAMETERS:
-
-* **instances** (`number`)
-
-Set the desired number of PostgreSQL instances. The default is `1`.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withInstances(3),
-}
-```
-
-### fn withNamespace
-
-```jsonnet
-withNamespace(namespace)
-```
-
-PARAMETERS:
-
-* **namespace** (`string`)
-
-Set the Cluster namespace. The default is `default`.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withNamespace('database'),
-}
-```
-
-### fn withRole
-
-```jsonnet
-withRole(name, secretName)
-```
-
-PARAMETERS:
-
-* **name** (`string`)
-* **secretName** (`string`)
-
-Add a managed login role backed by the named password Secret.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withRole('app', 'app-postgres'),
-}
-```
-
-### fn withSharedPreloadLibraries
-
-```jsonnet
-withSharedPreloadLibraries(libraries)
-```
-
-PARAMETERS:
-
-* **libraries** (`array`)
-
-Add PostgreSQL shared preload libraries. Duplicate names are removed.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withSharedPreloadLibraries(['pg_stat_statements']),
-}
-```
-
-### fn withStorageClass
-
-```jsonnet
-withStorageClass(storageClass)
-```
-
-PARAMETERS:
-
-* **storageClass** (`string`)
-
-Set the storage class. It is omitted by default.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withStorageClass('fast'),
-}
-```
-
-### fn withStorageSize
-
-```jsonnet
-withStorageSize(size)
-```
-
-PARAMETERS:
-
-* **size** (`string`)
-
-Set the requested storage size for each instance. The default is `5Gi`.
-
-Example:
-
-```jsonnet
-local cnpg = import 'labsonnet/helpers/cnpg.libsonnet';
-{
-  cluster:
-    cnpg.newCluster('postgres')
-    + cnpg.withStorageSize('50Gi'),
 }
 ```

@@ -2,36 +2,6 @@ from support import JsonnetTestCase
 
 
 class CNPGTests(JsonnetTestCase):
-    def test_cluster_nested_merges_preserve_extensions(self):
-        cluster = self.render_case("cnpg", "configured_cluster")["cluster"]
-        spec = cluster["spec"]
-        postgres = spec["postgresql"]
-
-        self.assertEqual(spec["instances"], 4)
-        self.assertEqual(
-            postgres["parameters"],
-            {"work_mem": "32MB", "max_connections": "200"},
-        )
-        self.assertEqual(
-            postgres["shared_preload_libraries"],
-            ["pg_stat_statements", "auto_explain", "pg_cron"],
-        )
-        self.assertEqual(
-            [extension["name"] for extension in postgres["extensions"]],
-            ["postgis", "pg_trgm", "plpgsql"],
-        )
-        self.assertEqual(
-            postgres["extensions"][0]["image"],
-            {
-                "reference": "registry.example/postgis:18",
-                "pullPolicy": "IfNotPresent",
-            },
-        )
-        self.assertEqual(postgres["extensions"][0]["extension_control_path"], ["share"])
-        self.assertEqual(postgres["extensions"][0]["dynamic_library_path"], ["lib"])
-        self.assertEqual(spec["imageCatalogRef"]["major"], 18)
-        self.assertNotIn("image", postgres["extensions"][2])
-
     def assert_tenant_relationships(
         self, tenant, database_name, app_namespace, resource_name, secret_name
     ):

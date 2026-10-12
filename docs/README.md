@@ -18,6 +18,11 @@ Create these one-line import files under `lib/`:
 | `lib/gateway-api.libsonnet`      | `import 'github.com/jsonnet-libs/gateway-api-libsonnet/1.1-experimental/main.libsonnet'` |
 | `lib/external-secrets.libsonnet` | `import 'github.com/jsonnet-libs/external-secrets-libsonnet/1.0/main.libsonnet'`         |
 
+To use `cnpg.cluster`, also install `github.com/jsonnet-libs/cloudnative-pg-libsonnet@main`
+with `jb install` and create `lib/cloudnative-pg.libsonnet` containing
+`import 'github.com/jsonnet-libs/cloudnative-pg-libsonnet/1.27.0/main.libsonnet'`.
+This downstream alias selects the upstream schema version. See [the CNPG helper](helpers/cnpg.md) for usage.
+
 Use versions available in your `vendor/` directory. Tanka includes `lib/` and
 `vendor/` in its import paths, so the library can use these short aliases.
 

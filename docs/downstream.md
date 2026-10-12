@@ -11,6 +11,7 @@ lib/
   k.libsonnet                 # One-line dependency import
   gateway-api.libsonnet      # One-line dependency import
   external-secrets.libsonnet # One-line dependency import
+  cloudnative-pg.libsonnet   # Upstream CNPG version for cnpg.cluster
   service.libsonnet          # Workload defaults and convenience methods
   helpers/
     affinity.libsonnet       # Local placement presets
